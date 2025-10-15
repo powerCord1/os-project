@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "numeric": "c",
+        "tty.h": "c"
+    },
+    "C_Cpp.default.includePath": ["include/"]
+}
