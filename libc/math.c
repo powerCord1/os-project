@@ -1,11 +1,13 @@
 #include <math.h>
+#include <stddef.h>
 #include <stdbool.h>
 
-int round_to_even(int n, bool roundUp) {
+size_t round_to_even(size_t n, bool roundUp) {
 	if ((n & 1) != 0) return roundUp ? n + 1 : n - 1;
 	return n;
 }
 
-double floor(double n) {
-    // TODO: add floor function
+size_t floordiv2(size_t n) {
+    if ((n & 1) != 0) n--;
+	return n / 2;
 }

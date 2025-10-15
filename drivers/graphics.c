@@ -29,7 +29,7 @@ void gfx_draw_title(const char* text) {
     }
 
     // draw text in middle of block
-    term_set_cursor_pos(0, round_to_even(height / 2, true));
+    term_set_cursor_pos(0, floordiv2(height));
     term_print_centered("middle");
 
     // set cursor after title
