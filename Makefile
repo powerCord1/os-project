@@ -21,7 +21,7 @@ OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
 all: $(TARGET)
 
-run:
+run: $(TARGET)
 	qemu-system-i386 -kernel $(TARGET) -display sdl
 
 $(BUILDDIR):
