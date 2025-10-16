@@ -47,6 +47,9 @@ clean:
 compile_commands:
 	compiledb -o $(BUILDDIR)/compile_commands.json make
 
+format:
+	clang-format -i $(shell find $(SRCDIR) \( -name '*.c' -o -name '*.h' \) -not -path './$(BUILDDIR)/*')
+
 rebuild: clean all
 
 .PHONY: all clean rebuild run
