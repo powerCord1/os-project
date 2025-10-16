@@ -1,1 +1,1 @@
-void panic(const char* reason);
+void panic(const char *reason);
