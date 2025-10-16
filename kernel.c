@@ -12,7 +12,7 @@
 void main(void) {
 	term_init();
 	gfx_draw_title("test");
-	term_writestring("writestring");
+	term_writestringln("writestring");
 	term_print_centered("centered text");
 	log_info("log test");
 	panic("panic test");

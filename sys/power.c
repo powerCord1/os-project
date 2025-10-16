@@ -1,7 +1,7 @@
 #include <stdint.h>
 
 #include <power.h>
-#include <x86/io.h>
+#include <io.h>
 
 void reboot(void) {
     uint8_t good = 0x02;

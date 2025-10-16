@@ -1,8 +1,8 @@
 #include <stdint.h>
 
-// TODO: why tf doesn't #include <x86/pic.h> work???
-#include "../include/x86/pic.h"
-#include "../include/x86/io.h"
+// TODO: why tf can't i include <pic.h>???
+#include "../include/pic.h"
+#include "../include/io.h"
 
 #define PIC1		0x20		/* IO base address for master PIC */
 #define PIC2		0xA0		/* IO base address for slave PIC */

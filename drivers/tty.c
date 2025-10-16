@@ -48,6 +48,10 @@ void term_set_color_entry(uint8_t color) {
 	term_color = color;
 }
 
+void term_reset_color(enum vga_color fg, enum vga_color bg) {
+	term_color = vga_entry_color(fg, bg);
+}
+
 uint8_t term_get_color_entry(void) {
 	return term_color;
 }
@@ -82,6 +86,10 @@ void term_write(const char* data, size_t size) {
 
 void term_writestring(const char* data) {
 	term_write(data, strlen(data));
+}
+
+void term_writestringln(const char* data) {
+	term_write(data, strlen(data));
 	term_newline();
 }
 
@@ -95,6 +103,6 @@ void term_print_centered(const char* text) {
 	uint8_t text_midpoint = round_to_even(strlen(text) / 2, false);
 	
 	term_cursor_x = screen_midpoint - text_midpoint;
-	term_writestring(text);
+	term_writestringln(text);
 	term_newline();
 }

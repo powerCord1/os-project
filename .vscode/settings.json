@@ -3,7 +3,8 @@
         "numeric": "c",
         "tty.h": "c",
         "string.h": "c",
-        "pic.h": "c"
+        "pic.h": "c",
+        "io.h": "c"
     },
     "C_Cpp.default.includePath": ["include/"]
 }

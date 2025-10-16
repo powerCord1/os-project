@@ -1,4 +1,4 @@
-#include <x86/cpu.h>
+#include <cpu.h>
 
 void halt(void) {
     asm volatile("hlt");

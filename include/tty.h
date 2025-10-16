@@ -10,6 +10,7 @@ void term_set_y(size_t c);
 void term_putchar(char c);
 void term_write(const char* data, size_t size);
 void term_writestring(const char* data);
+void term_writestringln(const char* data);
 void term_set_color(enum vga_color fg, enum vga_color bg);
 void term_set_color_entry(uint8_t color);
 uint8_t term_get_color_entry(void);
