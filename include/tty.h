@@ -2,9 +2,6 @@
 
 #include <vga.h>
 
-static const size_t VGA_WIDTH = 80;
-static const size_t VGA_HEIGHT = 25;
-
 void term_init(void);
 void term_clear(void);
 void term_set_cursor_pos(size_t x, size_t y);

@@ -2,12 +2,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <stdlib.h>
+#include <string.h>
 #include <tty.h>
 #include <vga.h>
 #include <math.h>
-
-static uint16_t* const VGA_MEMORY = (uint16_t*) 0xB8000;
 
 static size_t term_cursor_y;
 static size_t term_cursor_x;
@@ -76,7 +74,7 @@ void term_write(const char* data, size_t size) {
 			break;
 
 			default:
-				term_putchar(data[i]);
+				putchar(data[i]);
 			break;
 		}
 	}
@@ -84,6 +82,7 @@ void term_write(const char* data, size_t size) {
 
 void term_writestring(const char* data) {
 	term_write(data, strlen(data));
+	term_newline();
 }
 
 void term_newline(void) {
@@ -97,4 +96,5 @@ void term_print_centered(const char* text) {
 	
 	term_cursor_x = screen_midpoint - text_midpoint;
 	term_writestring(text);
+	term_newline();
 }
