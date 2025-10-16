@@ -44,6 +44,9 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.s | $(BUILDDIR)
 clean:
 	rm -rf $(BUILDDIR)
 
+compile_commands:
+	compiledb -o $(BUILDDIR)/compile_commands.json make
+
 rebuild: clean all
 
 .PHONY: all clean rebuild run
