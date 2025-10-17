@@ -18,7 +18,6 @@ void gfx_filled_line(void) {
 }
 
 void gfx_draw_title(const char* text) {
-	uint8_t orig_color = term_get_color_entry();
     uint8_t height = 3;
 
     // draw white block
@@ -30,12 +29,11 @@ void gfx_draw_title(const char* text) {
 
     // draw text in middle of block
     term_set_cursor_pos(0, floordiv2(height));
-    term_print_centered("TITLE");
+    term_print_centered(text);
 
     // set cursor after title
     term_set_cursor_pos(0, height + 1);
 
     // restore settings
-    term_set_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
-	term_set_color_entry(orig_color);
+	term_reset_color();
 }

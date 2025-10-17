@@ -11,9 +11,16 @@
 
 void main(void) {
 	term_init();
-	gfx_draw_title("test");
+	gfx_draw_title("TITLE");
 	term_writestringln("writestring");
 	term_print_centered("centered text");
-	log_info("log test");
-	panic("panic test");
+	log_verbose("verbose");
+	log_info("info");
+	log_warning("warning");
+	log_error("error");
+
+	term_newline();
+	for (int i = 0; i < 256; i++) {
+		putchar(i);
+	}
 }

@@ -48,8 +48,12 @@ void term_set_color_entry(uint8_t color) {
 	term_color = color;
 }
 
-void term_reset_color(enum vga_color fg, enum vga_color bg) {
-	term_color = vga_entry_color(fg, bg);
+uint8_t term_get_default_color(void) {
+	return vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+}
+
+void term_reset_color(void) {
+	term_color = term_get_default_color();
 }
 
 uint8_t term_get_color_entry(void) {
