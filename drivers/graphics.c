@@ -1,23 +1,26 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #include <graphics.h>
+#include <math.h>
+#include <stdio.h>
 #include <tty.h>
 #include <vga.h>
-#include <math.h>
 
-void gfx_filled_line(void) {
-	uint8_t prev_color = term_get_color_entry();
+void gfx_filled_line(void)
+{
+    uint8_t prev_color = term_get_color_entry();
     term_set_x(0);
-	term_set_color(VGA_COLOR_WHITE, VGA_COLOR_WHITE);
-	for (size_t i = 0; i < VGA_WIDTH; i++) {
-		putchar(' ');
-	}
-	term_set_color_entry(prev_color);
+    term_set_color(VGA_COLOR_WHITE, VGA_COLOR_WHITE);
+    for (size_t i = 0; i < VGA_WIDTH; i++) {
+        putchar(' ');
+    }
+    term_set_color_entry(prev_color);
 }
 
-void gfx_draw_title(const char* text) {
+void gfx_draw_title(const char *text)
+{
     uint8_t height = 3;
 
     // draw white block
@@ -35,5 +38,5 @@ void gfx_draw_title(const char* text) {
     term_set_cursor_pos(0, height + 1);
 
     // restore settings
-	term_reset_color();
+    term_reset_color();
 }

@@ -4,7 +4,17 @@
         "tty.h": "c",
         "string.h": "c",
         "pic.h": "c",
-        "io.h": "c"
+        "io.h": "c",
+        "stdbool.h": "c",
+        "cpuid.h": "c",
+        "types.h": "c",
+        "vga.h": "c",
+        "stddef.h": "c",
+        "stdio.h": "c",
+        "keyboard.h": "c",
+        "stdint.h": "c"
     },
-    "C_Cpp.default.includePath": ["include/"]
+    "C_Cpp.default.includePath": [
+        "include/"
+    ]
 }

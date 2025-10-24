@@ -2,25 +2,27 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <tty.h>
-#include <string.h>
-#include <graphics.h>
-#include <panic.h>
+#include <cpu.h>
+#include <cpuid.h>
 #include <debug.h>
+#include <graphics.h>
+#include <interrupts.h>
+#include <keyboard.h>
+#include <panic.h>
 #include <power.h>
+#include <stdio.h>
+#include <tty.h>
 
-void main(void) {
-	term_init();
-	gfx_draw_title("TITLE");
-	term_writestringln("writestring");
-	term_print_centered("centered text");
-	log_verbose("verbose");
-	log_info("info");
-	log_warning("warning");
-	log_error("error");
-
-	term_newline();
-	for (int i = 0; i < 256; i++) {
-		putchar(i);
-	}
+void main(void)
+{
+    idt_init();
+    term_init();
+    gfx_draw_title("TITLE");
+    log_verbose("verbose");
+    log_info("info");
+    log_warn("warning");
+    log_err("error");
+    while (1) {
+        halt();
+    }
 }

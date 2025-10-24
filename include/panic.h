@@ -1,1 +1,1 @@
-void panic(const char* reason);
+void __attribute__((noreturn)) panic(const char *reason);
