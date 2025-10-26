@@ -8,13 +8,14 @@
 #include <idt.h>
 #include <interrupts.h>
 #include <io.h>
+#include <keyboard.h>
 #include <panic.h>
 #include <pic.h>
 #include <stdio.h>
 #include <string.h>
 #include <tty.h>
 
-#define EXCEPT_VECTOR_TABLE_SIZE 32
+#define VECTOR_TABLE_SIZE 48
 
 void enable_interrupts()
 {
@@ -66,13 +67,13 @@ void interrupt_handler()
     term_writestringln("interrupt triggered");
 }
 
-void isr_stub_common()
+void isr_stub_keyboard()
 {
     __asm__ volatile("pushal\n"
-                     "call interrupt_handler");
-    pic_sendEOI(IRQ_TYPE_KEYBOARD);
-    __asm__ volatile("popal\n"
+                     "call handle_keypress\n"
+                     "popal\n"
                      "iret");
+    pic_sendEOI(IRQ_TYPE_KEYBOARD);
 }
 
 void isr_err_stub_common()
@@ -84,9 +85,10 @@ void isr_err_stub_common()
 void idt_init()
 {
     idtr.base = (uintptr_t)&idt[0];
-    idtr.limit = (uint16_t)sizeof(idt_entry_t) * 63;
+    idtr.limit = (uint16_t)sizeof(idt_entry_t) * VECTOR_TABLE_SIZE;
 
-    void *except_vector_table[EXCEPT_VECTOR_TABLE_SIZE] = {
+    void *except_vector_table[VECTOR_TABLE_SIZE] = {
+        // exceptions
         &isr_div_err,
         &isr_debug,
         &isr_nmi_int,
@@ -118,15 +120,33 @@ void idt_init()
         NULL,
         NULL,
         &isr_security_protection,
-        NULL};
+        NULL,
 
-    for (uint8_t i = 0; i < EXCEPT_VECTOR_TABLE_SIZE; i++) {
+        // interrupts
+        NULL,
+        &handle_keypress,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+    };
+
+    for (uint8_t i = 0; i < VECTOR_TABLE_SIZE; i++) {
         idt_set_descriptor_int(i, except_vector_table[i]);
     }
 
     __asm__ volatile("lidt %0" : : "m"(idtr));
-    outb(0x21, 0xfd);
-    outb(0xa1, 0xff);
+    pic_init();
+    irq_clear_mask(1);
     enable_interrupts();
-    // pic_init();
 }

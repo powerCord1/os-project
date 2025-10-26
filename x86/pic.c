@@ -27,7 +27,7 @@
 #define ICW4_SFNM 0x10       /* Special fully nested (not) */
 
 #define ICW2_MASTER_REMAP_OFFSET 0x20
-#define ICW2_SLAVE_REMAP_OFFSET 0x28
+#define ICW2_SLAVE_REMAP_OFFSET ICW2_MASTER_REMAP_OFFSET + 8
 
 #define CASCADE_IRQ 2
 
@@ -63,9 +63,8 @@ void pic_init()
     outb(PIC2_DATA, ICW4_8086);
     io_wait();
 
-    // Unmask both PICs.
-    outb(PIC1_DATA, 0);
-    outb(PIC2_DATA, 0);
+    outb(PIC1_DATA, 0xff);
+    outb(PIC2_DATA, 0xff);
 }
 
 void pic_disable()

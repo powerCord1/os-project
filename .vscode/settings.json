@@ -12,7 +12,9 @@
         "stddef.h": "c",
         "stdio.h": "c",
         "keyboard.h": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "interrupts.h": "c",
+        "power.h": "c"
     },
     "C_Cpp.default.includePath": [
         "include/"

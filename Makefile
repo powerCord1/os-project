@@ -25,7 +25,7 @@ run: $(TARGET)
 	qemu-system-i386 -kernel $(TARGET) -display sdl
 
 run_debug: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl -d cpu_reset
+	qemu-system-i386 -kernel $(TARGET) -display sdl -s -S
 
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)

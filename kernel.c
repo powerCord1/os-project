@@ -11,6 +11,7 @@
 #include <panic.h>
 #include <power.h>
 #include <stdio.h>
+#include <string.h>
 #include <tty.h>
 
 void main(void)

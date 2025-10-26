@@ -20,3 +20,8 @@ void get_keypress()
     // last_key = new_key;
     // printf("key pressed");
 }
+
+void handle_keypress()
+{
+    printf("key pressed");
+}
