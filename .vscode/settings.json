@@ -14,7 +14,9 @@
         "keyboard.h": "c",
         "stdint.h": "c",
         "interrupts.h": "c",
-        "power.h": "c"
+        "power.h": "c",
+        "gdt.h": "c",
+        "debug.h": "c"
     },
     "C_Cpp.default.includePath": [
         "include/"

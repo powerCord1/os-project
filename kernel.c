@@ -5,6 +5,7 @@
 #include <cpu.h>
 #include <cpuid.h>
 #include <debug.h>
+#include <gdt.h>
 #include <graphics.h>
 #include <interrupts.h>
 #include <keyboard.h>
@@ -16,6 +17,7 @@
 
 void main(void)
 {
+    gdt_init();
     idt_init();
     term_init();
     gfx_draw_title("TITLE");
@@ -25,5 +27,6 @@ void main(void)
     log_err("error");
     while (1) {
         halt();
+        log_info("interrupt return");
     }
 }

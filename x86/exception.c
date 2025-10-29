@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include <exception.h>
+#include <panic.h>
 #include <stdio.h>
 #include <string.h>
 

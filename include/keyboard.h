@@ -85,5 +85,4 @@ enum scancode_1 {
 };
 
 uint8_t get_key(void);
-void get_keypress(void);
 void handle_keypress(void);

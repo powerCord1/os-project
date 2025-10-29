@@ -67,13 +67,34 @@ void interrupt_handler()
     term_writestringln("interrupt triggered");
 }
 
-void isr_stub_keyboard()
+__attribute__((naked)) void isr_stub_keyboard()
 {
-    __asm__ volatile("pushal\n"
+    __asm__ volatile("pusha\n"
+                     "xor %eax, %eax\n"
+                     "mov %ax, %ds\n"
+                     "push %eax\n"
+
+                     "mov %ax, 0x10\n"
+                     "mov %ds, %ax\n"
+                     "mov %es, %ax\n"
+                     "mov %fs, %ax\n"
+                     "mov %gs, %ax\n"
+
+                     "push %esp\n"
                      "call handle_keypress\n"
-                     "popal\n"
-                     "iret");
+                     "add %esp, 4\n"
+
+                     "pop %eax\n"
+                     "mov %ds, %ax\n"
+                     "mov %es, %ax\n"
+                     "mov %fs, %ax\n"
+                     "mov %gs, %ax\n"
+
+                     "popa\n"
+                     "add %esp, 8\n"
+                     "leave\n"); // get rid of this at some point
     pic_sendEOI(IRQ_TYPE_KEYBOARD);
+    __asm__ volatile("iret");
 }
 
 void isr_err_stub_common()
@@ -84,7 +105,7 @@ void isr_err_stub_common()
 
 void idt_init()
 {
-    idtr.base = (uintptr_t)&idt[0];
+    idtr.base = (idt_entry_t *)&idt[0];
     idtr.limit = (uint16_t)sizeof(idt_entry_t) * VECTOR_TABLE_SIZE;
 
     void *except_vector_table[VECTOR_TABLE_SIZE] = {
@@ -124,7 +145,7 @@ void idt_init()
 
         // interrupts
         NULL,
-        &handle_keypress,
+        &isr_stub_keyboard,
         NULL,
         NULL,
         NULL,

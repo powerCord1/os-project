@@ -21,6 +21,22 @@
 				"panel": "shared",
 				"close": true
 			}
+		},
+		{
+			"label": "Build and run with debugging",
+			"type": "shell",
+			"command": "make run_debug",
+			"problemMatcher": [],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			},
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"panel": "shared",
+				"close": true
+			}
 		}
 	]
 }

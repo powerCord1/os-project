@@ -3,25 +3,18 @@
 #include <io.h>
 #include <keyboard.h>
 #include <stdio.h>
+#include <string.h>
 
 uint8_t get_key()
 {
     return inb(0x60);
 }
 
-void get_keypress()
-{
-    // uint8_t last_key = get_key();
-    // uint8_t new_key = last_key;
-
-    // while (new_key == last_key) {
-    //     new_key = get_key();
-    // }
-    // last_key = new_key;
-    // printf("key pressed");
-}
-
 void handle_keypress()
 {
-    printf("key pressed");
+    char key_hex[3];
+    uint8_t key = get_key();
+
+    itohexa(key_hex, key);
+    printf("Key: 0x%s", key_hex);
 }

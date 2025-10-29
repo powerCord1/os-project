@@ -26,7 +26,7 @@ void reboot(void)
     outb(0x64, 0xFE);
 }
 
-void shutdown(void)
+__attribute__((noreturn)) void shutdown(void)
 {
     term_clear();
     term_writestringln("Shutting down...");
@@ -42,5 +42,5 @@ void shutdown(void)
     term_writestringln("System was unable to shut down.");
     term_writestringln(
         "Please manually power off the system by pressing the power button.");
-    halt();
+    halt_catch_fire();
 }
