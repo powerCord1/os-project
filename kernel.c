@@ -27,6 +27,5 @@ void main(void)
     log_err("error");
     while (1) {
         halt();
-        log_info("interrupt return");
     }
 }

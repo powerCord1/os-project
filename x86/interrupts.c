@@ -70,31 +70,29 @@ void interrupt_handler()
 __attribute__((naked)) void isr_stub_keyboard()
 {
     __asm__ volatile("pusha\n"
-                     "xor %eax, %eax\n"
-                     "mov %ax, %ds\n"
+                     "mov %ds, %ax\n"
                      "push %eax\n"
 
-                     "mov %ax, 0x10\n"
-                     "mov %ds, %ax\n"
-                     "mov %es, %ax\n"
-                     "mov %fs, %ax\n"
-                     "mov %gs, %ax\n"
+                     "mov $0x10, %ax\n"
+                     "mov %ax, %ds\n"
+                     "mov %ax, %es\n"
+                     "mov %ax, %fs\n"
+                     "mov %ax, %gs\n"
 
-                     "push %esp\n"
                      "call handle_keypress\n"
-                     "add %esp, 4\n"
+
+                     "push $1\n"
+                     "call pic_sendEOI\n"
+                     "add $4, %esp\n"
 
                      "pop %eax\n"
-                     "mov %ds, %ax\n"
-                     "mov %es, %ax\n"
-                     "mov %fs, %ax\n"
-                     "mov %gs, %ax\n"
+                     "mov %ax, %ds\n"
+                     "mov %ax, %es\n"
+                     "mov %ax, %fs\n"
+                     "mov %ax, %gs\n"
 
                      "popa\n"
-                     "add %esp, 8\n"
-                     "leave\n"); // get rid of this at some point
-    pic_sendEOI(IRQ_TYPE_KEYBOARD);
-    __asm__ volatile("iret");
+                     "iret");
 }
 
 void isr_err_stub_common()
