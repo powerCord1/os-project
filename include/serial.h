@@ -1,3 +1,4 @@
-static int init_serial();
-int serial_received();
-char read_serial();
+int init_serial(void);
+int serial_received(void);
+char read_serial(void);
+void write_serial(char a);

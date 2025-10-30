@@ -22,10 +22,10 @@ OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 all: $(TARGET)
 
 run: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl
+	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio
 
 run_debug: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl -s -S
+	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -s -S
 
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)

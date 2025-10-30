@@ -11,15 +11,17 @@
 #include <keyboard.h>
 #include <panic.h>
 #include <power.h>
+#include <serial.h>
 #include <stdio.h>
 #include <string.h>
 #include <tty.h>
 
 void main(void)
 {
+    term_init();
     gdt_init();
     idt_init();
-    term_init();
+    init_serial();
     gfx_draw_title("TITLE");
     log_verbose("verbose");
     log_info("info");
