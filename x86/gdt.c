@@ -24,17 +24,13 @@ void gdt_set_gate(int num, unsigned long base, unsigned long limit,
 
 void gdt_flush()
 {
-    __asm__ volatile("lidt %0" : : "m"(gdtr));
+    __asm__ volatile("lgdt %0" : : "m"(gdtr));
     __asm__ volatile("ljmp $0x08, %0" : : "i"(&reload_cs));
 }
 
 void reload_cs()
 {
-    __asm__ volatile("mov %%ds, %0\n"
-                     "mov %%es, %0\n"
-                     "mov %%fs, %0\n"
-                     "mov %%gs, %0\n"
-                     "mov %%ss, %0\n"
-                     :
-                     : "r"(0x10));
+    __asm__ volatile("mov $0x10, %ax\n"
+                     "mov %ax, %ds\n"
+                     "mov %ax, %ss\n");
 }

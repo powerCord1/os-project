@@ -2,7 +2,7 @@
 
 #define PORT 0x3f8 // COM1
 
-int init_serial()
+int serial_init()
 {
     outb(PORT + 1, 0x00); // Disable all interrupts
     outb(PORT + 3, 0x80); // Enable DLAB (set baud rate divisor)
@@ -10,7 +10,7 @@ int init_serial()
     outb(PORT + 1, 0x00); //                  (hi byte)
     outb(PORT + 3, 0x03); // 8 bits, no parity, one stop bit
     outb(PORT + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
-    outb(PORT + 4, 0x0B); // IRQs enabled, RTS/DSR set
+    outb(PORT + 4, 0x03); // RTS/DSR set, IRQs disabled
     outb(PORT + 4, 0x1E); // Set in loopback mode, test the serial chip
     outb(PORT + 0, 0xAE); // Test serial chip (send byte 0xAE and check if
                           // serial returns same byte)
@@ -50,4 +50,17 @@ void write_serial(char a)
         ;
 
     outb(PORT, a);
+}
+
+void serial_writestring(const char *s)
+{
+    while (*s) {
+        write_serial(*s++);
+    }
+}
+
+void serial_writestringln(const char *s)
+{
+    serial_writestring(s);
+    serial_writestring("\n");
 }

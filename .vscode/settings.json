@@ -16,7 +16,8 @@
         "interrupts.h": "c",
         "power.h": "c",
         "gdt.h": "c",
-        "debug.h": "c"
+        "debug.h": "c",
+        "graphics.h": "c"
     },
     "C_Cpp.default.includePath": [
         "include/"

@@ -2,23 +2,18 @@
 #include <stdint.h>
 
 #include <debug.h>
+#include <serial.h>
 #include <stdio.h>
 #include <tty.h>
 
-static void write_log(uint8_t type, enum vga_color color, const char *msg,
-                      bool coloredMsg)
+static void write_log(uint8_t type, const char *color, const char *msg)
 {
     if (type <= LOGLEVEL) {
-        term_set_color(color, VGA_COLOR_BLACK);
-        term_writestring(get_log_text(type));
-        if (!coloredMsg) {
-            term_reset_color();
-        }
-        term_writestring(": ");
-        term_writestringln(msg);
-        if (coloredMsg) {
-            term_reset_color();
-        }
+        serial_writestring(color);
+        serial_writestring(get_log_text(type));
+        serial_writestring(ansi_color[ANSI_COLOR_NC]);
+        serial_writestring(": ");
+        serial_writestringln(msg);
     }
 }
 
@@ -48,22 +43,30 @@ const char *get_log_text(uint8_t type)
 
 void log_verbose(const char *msg)
 {
-    write_log(LOGLEVEL_VERBOSE, VGA_COLOR_LIGHT_BLUE, msg, false);
+    write_log(LOGLEVEL_VERBOSE, ansi_color[ANSI_COLOR_LIGHT_BLUE], msg);
 }
 
 void log_info(const char *msg)
 {
-    write_log(LOGLEVEL_INFO, VGA_COLOR_BLUE, msg, false);
+    write_log(LOGLEVEL_INFO, ansi_color[ANSI_COLOR_BLUE], msg);
 }
 
 void log_warn(const char *msg)
 {
-    write_log(LOGLEVEL_WARN, VGA_COLOR_BROWN, msg, false);
+    write_log(LOGLEVEL_WARN, ansi_color[ANSI_COLOR_YELLOW], msg);
 }
 
 void log_err(const char *msg)
 {
-    write_log(LOGLEVEL_ERROR, VGA_COLOR_RED, msg, true);
+    write_log(LOGLEVEL_ERROR, ansi_color[ANSI_COLOR_RED], msg);
+}
+
+void log_test()
+{
+    log_err("error");
+    log_warn("warning");
+    log_info("info");
+    log_verbose("verbose");
 }
 
 void breakpoint()

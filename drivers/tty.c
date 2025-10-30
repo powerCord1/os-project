@@ -20,6 +20,7 @@ void term_init()
     term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     term_clear();
     enable_cursor();
+    term_putentryat('D', term_color, 10, 4);
 }
 void term_clear()
 {
@@ -100,6 +101,19 @@ void term_putentryat(char c, uint8_t color, size_t x, size_t y)
     term_buffer[index] = vga_entry(c, color);
 }
 
+void term_delete()
+{
+    if (term_cursor_x >= VGA_WIDTH) {
+        return;
+    }
+
+    memmove(term_buffer + term_cursor_y * VGA_WIDTH + term_cursor_x,
+            term_buffer + term_cursor_y * VGA_WIDTH + term_cursor_x + 1,
+            (VGA_WIDTH - term_cursor_x - 1) * sizeof(uint16_t));
+
+    term_putentryat(' ', term_color, VGA_WIDTH - 1, term_cursor_y);
+}
+
 void term_backspace()
 {
     if (term_cursor_x > 0) {
@@ -112,7 +126,6 @@ void term_backspace()
         return;
     }
 
-    // Erase the character at the new cursor position
     term_putentryat(' ', term_color, term_cursor_x, term_cursor_y);
 
     vga_set_cursor(term_cursor_x, term_cursor_y);
@@ -125,6 +138,9 @@ void term_putchar(char c)
         return;
     } else if (c == '\b') {
         term_backspace();
+        return;
+    } else if (c == 127) { // ASCII DEL
+        term_delete();
         return;
     }
     term_putentryat(c, term_color, term_cursor_x, term_cursor_y);

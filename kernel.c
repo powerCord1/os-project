@@ -21,10 +21,10 @@ void main(void)
     term_init();
     gdt_init();
     idt_init();
-    init_serial();
+    serial_init();
     gfx_draw_title("TYPEWRITER");
+    log_test();
     while (1) {
         halt();
-        // term_scroll(1);
     }
 }

@@ -20,6 +20,7 @@ uint8_t term_get_color_entry(void);
 void term_reset_color(void);
 uint8_t term_get_default_color(void);
 void term_set_color_entry(uint8_t color);
+void term_delete(void);
 void term_backspace(void);
 void term_newline(void);
 void term_print_centered(const char *text);

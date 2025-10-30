@@ -11,7 +11,7 @@ void enable_cursor(void)
     }
     outb(0x3D4, 0x0B);
     if (CURSOR_BLOCK) {
-        (0x3D5, (inb(0x3D5) & 0xE0) | 15);
+        outb(0x3D5, (inb(0x3D5) & 0xE0) | 15);
     }
 }
 

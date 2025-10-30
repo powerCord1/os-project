@@ -14,8 +14,7 @@ void handle_keypress(void)
 {
     uint8_t key = get_key();
 
-    if (key & 0x80) {
-        // key release
+    if (key & 0x80) { // key release
     } else {
         term_putchar(scancode_map[key]);
     }

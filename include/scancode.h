@@ -86,6 +86,7 @@ enum scancode_1 {
     KEY_SCROLLLOCK = 0x46,
     KEY_F11 = 0x57,
     KEY_F12 = 0x58,
+    KEY_DELETE = 0x53,
 };
 
 static const char scancode_map[256] = {
@@ -141,4 +142,5 @@ static const char scancode_map[256] = {
     [KEY_DOT] = '.',
     [KEY_SLASH] = '/',
     [KEY_SPACE] = ' ',
+    [KEY_DELETE] = 127, // ASCII DEL character
 };

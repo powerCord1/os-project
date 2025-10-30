@@ -12,7 +12,7 @@ typedef struct {
     uint8_t base_mid;
     uint8_t access;
     uint8_t flags_limit_high;
-    uint16_t base_high;
+    uint8_t base_high;
 } __attribute__((packed)) gdt_entry_t;
 
 typedef struct {
