@@ -22,12 +22,9 @@ void main(void)
     gdt_init();
     idt_init();
     init_serial();
-    gfx_draw_title("TITLE");
-    log_verbose("verbose");
-    log_info("info");
-    log_warn("warning");
-    log_err("error");
+    gfx_draw_title("TYPEWRITER");
     while (1) {
         halt();
+        // term_scroll(1);
     }
 }

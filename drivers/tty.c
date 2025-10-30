@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <debug.h>
 #include <math.h>
 #include <string.h>
 #include <tty.h>
@@ -14,11 +15,11 @@ static uint16_t *term_buffer = (uint16_t *)VGA_MEMORY;
 
 void term_init()
 {
-    disable_cursor();
     term_cursor_y = 0;
     term_cursor_x = 0;
     term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     term_clear();
+    enable_cursor();
 }
 void term_clear()
 {
@@ -28,13 +29,14 @@ void term_clear()
             term_buffer[index] = vga_entry(' ', term_color);
         }
     }
-    term_set_cursor_pos(0, 0);
+    term_set_cursor(0, 0);
 }
 
-void term_set_cursor_pos(size_t x, size_t y)
+void term_set_cursor(size_t x, size_t y)
 {
     term_cursor_x = x;
     term_cursor_y = y;
+    vga_set_cursor(term_cursor_x, term_cursor_y);
 }
 
 void term_set_x(size_t c)
@@ -72,8 +74,24 @@ uint8_t term_get_color_entry()
     return term_color;
 }
 
-void term_scroll()
+void term_scroll(int lines)
 {
+    if (lines <= 0) {
+        return;
+    }
+    if ((size_t)lines >= VGA_HEIGHT) {
+        term_clear();
+        return;
+    }
+
+    memmove(term_buffer, term_buffer + lines * VGA_WIDTH,
+            (VGA_HEIGHT - lines) * VGA_WIDTH * sizeof(uint16_t));
+
+    for (size_t y = VGA_HEIGHT - lines; y < VGA_HEIGHT; y++) {
+        for (size_t x = 0; x < VGA_WIDTH; x++) {
+            term_buffer[y * VGA_WIDTH + x] = vga_entry(' ', term_color);
+        }
+    }
 }
 
 void term_putentryat(char c, uint8_t color, size_t x, size_t y)
@@ -82,29 +100,59 @@ void term_putentryat(char c, uint8_t color, size_t x, size_t y)
     term_buffer[index] = vga_entry(c, color);
 }
 
+void term_backspace()
+{
+    if (term_cursor_x > 0) {
+        term_cursor_x--;
+    } else if (term_cursor_y > 0) {
+        term_cursor_y--;
+        term_cursor_x = VGA_WIDTH - 1;
+    } else {
+        // At 0,0, do nothing
+        return;
+    }
+
+    // Erase the character at the new cursor position
+    term_putentryat(' ', term_color, term_cursor_x, term_cursor_y);
+
+    vga_set_cursor(term_cursor_x, term_cursor_y);
+}
+
 void term_putchar(char c)
 {
-    term_putentryat(c, term_color, term_cursor_x, term_cursor_y);
-    if (++term_cursor_x == VGA_WIDTH) {
-        term_cursor_x = 0;
-        if (++term_cursor_y == VGA_HEIGHT) {
-            term_cursor_y = 0;
-        }
+    if (c == '\n') {
+        term_newline();
+        return;
+    } else if (c == '\b') {
+        term_backspace();
+        return;
     }
+    term_putentryat(c, term_color, term_cursor_x, term_cursor_y);
+    if (++term_cursor_x >= VGA_WIDTH) {
+        term_newline();
+    }
+    vga_set_cursor(term_cursor_x, term_cursor_y);
+}
+
+char term_getchar(int x, int y)
+{
+    return term_buffer[2 * (y * VGA_WIDTH + x)];
+}
+
+uint8_t term_getcolor(int x, int y)
+{
+    return term_buffer[2 * (y * VGA_WIDTH + x) + 1];
+}
+
+void term_putcolor(int x, int y, uint8_t color)
+{
+    term_buffer[2 * (y * VGA_WIDTH + x) + 1] = color;
 }
 
 void term_write(const char *data, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
-        switch (data[i]) {
-        case '\n':
-            term_newline();
-            break;
-
-        default:
-            term_putchar(data[i]);
-            break;
-        }
+        term_putchar(data[i]);
     }
 }
 
@@ -121,8 +169,13 @@ void term_writestringln(const char *data)
 
 void term_newline()
 {
-    term_cursor_y++;
     term_cursor_x = 0;
+    term_cursor_y++;
+    if (term_cursor_y >= VGA_HEIGHT) {
+        term_scroll(1);
+        term_cursor_y = VGA_HEIGHT - 1;
+    }
+    vga_set_cursor(term_cursor_x, term_cursor_y);
 }
 
 void term_print_centered(const char *text)
@@ -131,8 +184,7 @@ void term_print_centered(const char *text)
     uint8_t text_midpoint = round_to_even(strlen(text) / 2, false);
 
     term_cursor_x = screen_midpoint - text_midpoint;
-    term_writestringln(text);
-    term_newline();
+    term_writestring(text);
 }
 
 void term_chartest()

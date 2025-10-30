@@ -2,19 +2,21 @@
 
 #include <io.h>
 #include <keyboard.h>
-#include <stdio.h>
-#include <string.h>
+#include <scancode.h>
+#include <tty.h>
 
 uint8_t get_key()
 {
     return inb(0x60);
 }
 
-void handle_keypress()
+void handle_keypress(void)
 {
-    char key_hex[3];
     uint8_t key = get_key();
 
-    itohexa(key_hex, key);
-    printf("Key: 0x%s", key_hex);
+    if (key & 0x80) {
+        // key release
+    } else {
+        term_putchar(scancode_map[key]);
+    }
 }

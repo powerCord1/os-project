@@ -1,6 +1,6 @@
 void idt_init(void);
 void isr_stub_common(void);
-__attribute__((naked)) void isr_stub_keyboard(void);
+void isr_stub_keyboard(void);
 void enable_interrupts(void);
 void disable_interrupts(void);
 
@@ -18,31 +18,4 @@ enum irq_types {
     IRQ_TYPE_COPROCESSOR = 13,
     IRQ_TYPE_HDD_1 = 14,
     IRQ_TYPE_HDD_2 = 15
-};
-
-enum exception_vectors {
-    EXCEPT_DIV = 0,
-    EXCEPT_SINGLE_STEP_DEBUG = 1,
-    EXCEPT_NON_MASKABLE_INTERRUPT = 2,
-    EXCEPT_BREAKPOINT = 3,
-    EXCEPT_OVERFLOW = 4,
-    EXCEPT_BOUND_RANGE_EXCEEDED = 5,
-    EXCEPT_INVALID_OPCODE = 6,
-    EXCEPT_NO_FPU = 7,
-    EXCEPT_DOUBLE_FAULT = 8,
-    EXCEPT_COPROCESSOR_SEGMENT_OVERRUN = 9,
-    EXCEPT_INVALID_TASK_STATE_SEGMENT = 10,
-    EXCEPT_SEGMENT_NOT_PRESENT = 11,
-    EXCEPT_STACK_SEGMENT_FAULT = 12,
-    EXCEPT_GENERAL_PROTECTION_FAULT = 13,
-    EXCEPT_PAGE_FAULT = 14,
-    EXCEPT_X87_FLOAT_POINT = 16,
-    EXCEPT_ALIGNMENT_CHECK = 17,
-    EXCEPT_MACHINE_CHECK = 18,
-    EXCEPT_SIMD_FLOAT_POINT = 19,
-    EXCEPT_VIRTUALISATION = 20,
-    EXCEPT_CONTROL_PROTECTION = 21,
-    EXCEPT_HYPERVISOR_INJECTION = 28,
-    EXCEPT_VMM_COMM = 29,
-    EXCEPT_SECURITY = 30
 };

@@ -38,3 +38,4 @@ static inline uint16_t vga_entry(unsigned char uc, uint8_t color)
 
 void enable_cursor(void);
 void disable_cursor(void);
+void vga_set_cursor(int x, int y);

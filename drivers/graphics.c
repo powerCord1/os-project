@@ -24,18 +24,18 @@ void gfx_draw_title(const char *text)
     uint8_t height = 3;
 
     // draw white block
-    term_set_cursor_pos(0, 0);
+    term_set_cursor(0, 0);
     for (size_t i = 0; i < height * VGA_WIDTH; i++) {
         term_set_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
         term_putchar(' ');
     }
 
     // draw text in middle of block
-    term_set_cursor_pos(0, floordiv2(height));
+    term_set_cursor(0, floordiv2(height));
     term_print_centered(text);
 
     // set cursor after title
-    term_set_cursor_pos(0, height + 1);
+    term_set_cursor(0, height + 1);
 
     // restore settings
     term_reset_color();
