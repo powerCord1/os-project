@@ -121,7 +121,7 @@ void term_backspace()
         term_cursor_y--;
         term_cursor_x = VGA_WIDTH - 1;
     } else {
-        // At 0,0, do nothing
+        // do nothing at 0,0
         return;
     }
 

@@ -1,5 +1,8 @@
 #include <gdt.h>
 
+gdt_entry_t gdt[GDT_ENTRIES];
+gdtr_t gdtr;
+
 void gdt_init()
 {
     gdt_set_gate(0, 0, 0, 0, 0);

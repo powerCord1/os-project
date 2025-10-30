@@ -10,6 +10,7 @@
 #include <interrupts.h>
 #include <keyboard.h>
 #include <panic.h>
+#include <pit.h>
 #include <power.h>
 #include <serial.h>
 #include <stdio.h>
@@ -21,6 +22,7 @@ void main(void)
     term_init();
     gdt_init();
     idt_init();
+    pit_init(100); // 100hz
     serial_init();
     gfx_draw_title("TYPEWRITER");
     log_test();

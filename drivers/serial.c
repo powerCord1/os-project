@@ -1,4 +1,11 @@
 #include <io.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#include <stdio.h>
+#include <string.h>
 
 #define PORT 0x3f8 // COM1
 
@@ -63,4 +70,24 @@ void serial_writestringln(const char *s)
 {
     serial_writestring(s);
     serial_writestring("\n");
+}
+
+static int serial_putchar(int c)
+{
+    write_serial((char)c);
+    return c;
+}
+
+int vserial_printf(const char *restrict format, va_list parameters)
+{
+    return vprintf_generic(serial_putchar, format, parameters);
+}
+
+int serial_printf(const char *restrict format, ...)
+{
+    va_list parameters;
+    va_start(parameters, format);
+    int written = vserial_printf(format, parameters);
+    va_end(parameters);
+    return written;
 }

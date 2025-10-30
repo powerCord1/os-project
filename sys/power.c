@@ -4,6 +4,7 @@
 #include <interrupts.h>
 #include <io.h>
 #include <power.h>
+#include <stdio.h>
 #include <string.h>
 #include <tty.h>
 
@@ -17,17 +18,16 @@
 #define SHUTDOWN_SIG_VBOX 0x3400
 #define SHUTDOWN_SIG_CLOUD_HYPERVISOR 0x34
 
-void reboot(void)
+__attribute__((noreturn)) void reboot(void)
 {
-    // Add a timeout to prevent an infinite loop
-    for (int i = 0; i < 10000; i++) {
-        // Wait for the keyboard controller's input buffer to be clear
-        if ((inb(0x64) & 0x02) == 0) {
-            outb(0x64, 0xFE); // Send the reboot command
-            break;
-        }
-    }
-    // If reboot fails, you might want to log an error or halt.
+    outb(0x64, 0xFE);
+
+    // should have rebooted by now
+    term_clear();
+    printf(
+        "System was unable to reboot\n"
+        "You can manually power off the system by pressing the power button");
+    halt_catch_fire();
 }
 
 __attribute__((noreturn)) void shutdown(void)
@@ -43,8 +43,8 @@ __attribute__((noreturn)) void shutdown(void)
 
     // system should have powered off by now, in case it hasn't, show a message
     term_clear();
-    term_writestringln("System was unable to shut down.");
-    term_writestringln(
+    printf(
+        "System was unable to shut down\n"
         "Please manually power off the system by pressing the power button.");
     halt_catch_fire();
 }

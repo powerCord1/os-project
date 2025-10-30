@@ -1,8 +1,7 @@
 #include <stdint.h>
 
-// TODO: why tf can't i include <pic.h>???
-#include "../include/io.h"
-#include "../include/pic.h"
+#include <io.h>
+#include <pic.h>
 
 #define PIC1 0x20 /* IO base address for master PIC */
 #define PIC2 0xA0 /* IO base address for slave PIC */
@@ -36,6 +35,11 @@ void pic_sendEOI(uint8_t irq)
     if (irq >= 8) {
         outb(PIC2_COMMAND, PIC_EOI);
     }
+    outb(PIC1_COMMAND, PIC_EOI);
+}
+
+void pic_sendEOI_master()
+{
     outb(PIC1_COMMAND, PIC_EOI);
 }
 

@@ -1,2 +1,2 @@
-void reboot(void);
-void shutdown(void);
+__attribute__((noreturn)) void reboot(void);
+__attribute__((noreturn)) void shutdown(void);

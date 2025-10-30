@@ -20,8 +20,8 @@ typedef struct {
     gdt_entry_t *base;
 } __attribute__((packed)) gdtr_t;
 
-static gdt_entry_t gdt[GDT_ENTRIES];
-static gdtr_t gdtr;
+extern gdt_entry_t gdt[GDT_ENTRIES];
+extern gdtr_t gdtr;
 
 void gdt_init(void);
 extern void gdt_flush(void);

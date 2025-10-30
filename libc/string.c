@@ -50,3 +50,48 @@ char *itohexa(char *dest, unsigned x)
     *itohexa_helper(dest, x) = '\0';
     return dest;
 }
+
+char *itoa(char *dest, int n)
+{
+    char *ptr = dest;
+    if (n < 0) {
+        *ptr++ = '-';
+        n = -n;
+    }
+
+    int num_digits = 0;
+    int temp = n;
+    do {
+        num_digits++;
+        temp /= 10;
+    } while (temp > 0);
+
+    if (n == 0) {
+        num_digits = 1;
+    }
+
+    ptr += num_digits;
+    *ptr-- = '\0';
+
+    do {
+        *ptr-- = (n % 10) + '0';
+        n /= 10;
+    } while (n > 0);
+
+    return dest;
+}
+
+static char *uitoa_helper(char *dest, unsigned int n)
+{
+    if (n >= 10) {
+        dest = uitoa_helper(dest, n / 10);
+    }
+    *dest++ = (n % 10) + '0';
+    return dest;
+}
+
+char *uitoa(char *dest, unsigned int n)
+{
+    *uitoa_helper(dest, n) = '\0';
+    return dest;
+}

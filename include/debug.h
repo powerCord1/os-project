@@ -7,10 +7,10 @@
 
 #define LOGLEVEL 4
 
-void log_err(const char *msg);
-void log_warn(const char *msg);
-void log_info(const char *msg);
-void log_verbose(const char *msg);
+void log_err(const char *format, ...);
+void log_warn(const char *format, ...);
+void log_info(const char *format, ...);
+void log_verbose(const char *format, ...);
 const char *get_log_text(uint8_t type);
 void log_test();
 void breakpoint(void);

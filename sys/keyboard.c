@@ -10,7 +10,7 @@ uint8_t get_key()
     return inb(0x60);
 }
 
-void handle_keypress(void)
+void keyboard_handler(void)
 {
     uint8_t key = get_key();
 

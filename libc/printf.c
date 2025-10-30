@@ -7,22 +7,21 @@
 #include <string.h>
 #include <tty.h>
 
-static bool print(const char *data, size_t length)
+static bool print(int (*putc_func)(int), const char *data, size_t length)
 {
     const unsigned char *bytes = (const unsigned char *)data;
     for (size_t i = 0; i < length; i++) {
-        if (!putchar(bytes[i])) {
+        if (putc_func(bytes[i]) == -1) {
             return false;
         }
     }
     return true;
 }
 
-int printf(const char *restrict format, ...)
+int vprintf_generic(int (*putc_func)(int),
+                    const char *restrict format, // NOLINT
+                    va_list parameters)
 {
-    va_list parameters;
-    va_start(parameters, format);
-
     int written = 0;
 
     while (*format != '\0') {
@@ -40,7 +39,7 @@ int printf(const char *restrict format, ...)
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(format, amount)) {
+            if (!print(putc_func, format, amount)) {
                 return -1;
             }
             format += amount;
@@ -57,7 +56,7 @@ int printf(const char *restrict format, ...)
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(&c, sizeof(c))) {
+            if (putc_func(c) == -1) {
                 return -1;
             }
             written++;
@@ -69,7 +68,7 @@ int printf(const char *restrict format, ...)
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(str, len)) {
+            if (!print(putc_func, str, len)) {
                 return -1;
             }
             written += len;
@@ -83,7 +82,35 @@ int printf(const char *restrict format, ...)
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(hex_str, len)) {
+            if (!print(putc_func, hex_str, len)) {
+                return -1;
+            }
+            written += len;
+        } else if (*format == 'd') {
+            format++;
+            int i = va_arg(parameters, int);
+            char str[12]; // Max 11 chars for a 32-bit signed int + null
+            itoa(str, i);
+            size_t len = strlen(str);
+            if (maxrem < len) {
+                // TODO: Set errno to EOVERFLOW.
+                return -1;
+            }
+            if (!print(putc_func, str, len)) {
+                return -1;
+            }
+            written += len;
+        } else if (*format == 'u') {
+            format++;
+            unsigned int i = va_arg(parameters, unsigned int);
+            char str[11]; // Max 10 chars for a 32-bit unsigned int + null
+            uitoa(str, i);
+            size_t len = strlen(str);
+            if (maxrem < len) {
+                // TODO: Set errno to EOVERFLOW.
+                return -1;
+            }
+            if (!print(putc_func, str, len)) {
                 return -1;
             }
             written += len;
@@ -94,7 +121,7 @@ int printf(const char *restrict format, ...)
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(format, len)) {
+            if (!print(putc_func, format, len)) {
                 return -1;
             }
             written += len;
@@ -102,8 +129,19 @@ int printf(const char *restrict format, ...)
         }
     }
 
-    term_newline();
+    return written;
+}
 
+int vprintf(const char *restrict format, va_list parameters)
+{
+    return vprintf_generic(putchar, format, parameters);
+}
+
+int printf(const char *restrict format, ...)
+{
+    va_list parameters;
+    va_start(parameters, format);
+    int written = vprintf(format, parameters);
     va_end(parameters);
     return written;
 }

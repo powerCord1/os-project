@@ -6,4 +6,6 @@ void *memmove(void *, const void *, size_t);
 void *memset(void *, int, size_t);
 size_t strlen(const char *str);
 
+char *itoa(char *dest, int n);
+char *uitoa(char *dest, unsigned int n);
 char *itohexa(char *dest, unsigned x);

@@ -48,16 +48,6 @@ void idt_set_descriptor_trap(uint8_t vector, void *isr)
     idt_set_descriptor(vector, isr, 0x8F);
 }
 
-void exception_handler()
-{
-    panic("Critical system error");
-}
-
-void interrupt_handler()
-{
-    term_writestringln("interrupt triggered");
-}
-
 __attribute__((naked)) void isr_stub_keyboard()
 {
     __asm__ volatile("pusha\n"
@@ -70,11 +60,8 @@ __attribute__((naked)) void isr_stub_keyboard()
                      "mov %ax, %fs\n"
                      "mov %ax, %gs\n"
 
-                     "call handle_keypress\n"
-
-                     "push $1\n"
-                     "call pic_sendEOI\n"
-                     "add $4, %esp\n"
+                     "call keyboard_handler\n"
+                     "call pic_sendEOI_master\n"
 
                      "pop %eax\n"
                      "mov %ax, %ds\n"
@@ -86,10 +73,30 @@ __attribute__((naked)) void isr_stub_keyboard()
                      "iret");
 }
 
-void isr_err_stub_common()
+__attribute__((naked)) void isr_stub_pit()
 {
-    exception_handler();
-    __asm__("iret");
+    __asm__ volatile("pusha\n"
+                     "mov %ds, %ax\n"
+                     "push %eax\n"
+
+                     "mov $0x10, %ax\n"
+                     "mov %ax, %ds\n"
+                     "mov %ax, %es\n"
+                     "mov %ax, %fs\n"
+                     "mov %ax, %gs\n"
+
+                     "call pit_handler\n"
+
+                     "call pic_sendEOI_master\n"
+
+                     "pop %eax\n"
+                     "mov %ax, %ds\n"
+                     "mov %ax, %es\n"
+                     "mov %ax, %fs\n"
+                     "mov %ax, %gs\n"
+
+                     "popa\n"
+                     "iret");
 }
 
 void idt_init()
@@ -133,7 +140,7 @@ void idt_init()
         NULL,
 
         // interrupts
-        NULL,
+        &isr_stub_pit,
         &isr_stub_keyboard,
         NULL,
         NULL,
@@ -157,6 +164,7 @@ void idt_init()
 
     __asm__ volatile("lidt %0" : : "m"(idtr));
     pic_init();
-    irq_clear_mask(1);
+    irq_clear_mask(IRQ_TYPE_PIT);
+    irq_clear_mask(IRQ_TYPE_KEYBOARD);
     enable_interrupts();
 }

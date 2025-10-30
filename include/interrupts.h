@@ -1,5 +1,4 @@
 void idt_init(void);
-void isr_stub_common(void);
 void isr_stub_keyboard(void);
 void enable_interrupts(void);
 void disable_interrupts(void);
