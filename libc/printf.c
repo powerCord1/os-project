@@ -73,6 +73,20 @@ int printf(const char *restrict format, ...)
                 return -1;
             }
             written += len;
+        } else if (*format == 'x') {
+            format++;
+            unsigned int i = va_arg(parameters, unsigned int);
+            char hex_str[9]; // 8 hex chars + null terminator
+            itohexa(hex_str, i);
+            size_t len = strlen(hex_str);
+            if (maxrem < len) {
+                // TODO: Set errno to EOVERFLOW.
+                return -1;
+            }
+            if (!print(hex_str, len)) {
+                return -1;
+            }
+            written += len;
         } else {
             format = format_begun_at;
             size_t len = strlen(format);

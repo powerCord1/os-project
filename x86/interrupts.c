@@ -50,15 +50,6 @@ void idt_set_descriptor_trap(uint8_t vector, void *isr)
 
 void exception_handler()
 {
-    uint32_t err_code;
-    __asm__ volatile("pop %%eax\n"
-                     "movl $0, %0"
-                     : "=r"(err_code)
-                     :
-                     : "%eax");
-    char hex_str[9];
-    itohexa(hex_str, err_code);
-    printf("error code: 0x%s", hex_str);
     panic("Critical system error");
 }
 

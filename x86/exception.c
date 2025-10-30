@@ -78,9 +78,7 @@ void isr_gpf()
                      : "=r"(err_code)
                      :
                      : "%eax");
-    char hex_str[9];
-    itohexa(hex_str, err_code);
-    printf("error code: 0x%s", hex_str);
+    printf("error code: 0x%x", err_code);
     panic("general protection fault");
 }
 
