@@ -58,7 +58,7 @@ void interrupt_handler()
     term_writestringln("interrupt triggered");
 }
 
-void isr_stub_keyboard()
+__attribute__((naked)) void isr_stub_keyboard()
 {
     __asm__ volatile("pusha\n"
                      "mov %ds, %ax\n"

@@ -19,11 +19,15 @@
 
 void reboot(void)
 {
-    uint8_t good = 0x02;
-    while (good & 0x02) {
-        good = inb(0x64);
+    // Add a timeout to prevent an infinite loop
+    for (int i = 0; i < 10000; i++) {
+        // Wait for the keyboard controller's input buffer to be clear
+        if ((inb(0x64) & 0x02) == 0) {
+            outb(0x64, 0xFE); // Send the reboot command
+            break;
+        }
     }
-    outb(0x64, 0xFE);
+    // If reboot fails, you might want to log an error or halt.
 }
 
 __attribute__((noreturn)) void shutdown(void)

@@ -11,6 +11,7 @@ ASFLAGS =
 LDFLAGS = -T linker.ld -ffreestanding -O2 -nostdlib -lgcc
 
 TARGET = $(BUILDDIR)/os.bin
+ISO_TARGET = $(BUILDDIR)/os.iso
 
 C_SOURCES = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*')
 ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*')
@@ -26,6 +27,9 @@ run: $(TARGET)
 
 run_debug: $(TARGET)
 	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -s -S
+
+run_cdrom: $(ISO_TARGET)
+	qemu-system-i386 -cdrom $(ISO_TARGET) -display sdl -serial stdio
 
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
@@ -44,6 +48,16 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.s | $(BUILDDIR)
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
+cdrom: $(ISO_TARGET)
+
+$(ISO_TARGET): $(TARGET)
+	@echo "Creating ISO image..."
+	@mkdir -p $(BUILDDIR)/iso/boot/grub
+	cp $(TARGET) $(BUILDDIR)/iso/boot/os.bin
+	echo 'menuentry "os" {multiboot /boot/os.bin}' > $(BUILDDIR)/iso/boot/grub/grub.cfg
+	grub-mkrescue -o $(ISO_TARGET) $(BUILDDIR)/iso
+	@echo "ISO image created at $(ISO_TARGET)"
+
 clean:
 	rm -rf $(BUILDDIR)
 
@@ -55,4 +69,4 @@ format:
 
 rebuild: clean all
 
-.PHONY: all clean rebuild run
+.PHONY: all clean rebuild run run_debug run_cdrom cdrom

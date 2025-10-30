@@ -17,7 +17,8 @@
         "power.h": "c",
         "gdt.h": "c",
         "debug.h": "c",
-        "graphics.h": "c"
+        "graphics.h": "c",
+        "serial.h": "c"
     },
     "C_Cpp.default.includePath": [
         "include/"

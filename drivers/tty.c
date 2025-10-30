@@ -20,7 +20,6 @@ void term_init()
     term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     term_clear();
     enable_cursor();
-    term_putentryat('D', term_color, 10, 4);
 }
 void term_clear()
 {
