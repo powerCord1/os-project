@@ -4,6 +4,7 @@
 
 #include <debug.h>
 #include <math.h>
+#include <pit.h>
 #include <string.h>
 #include <tty.h>
 #include <vga.h>
@@ -121,7 +122,8 @@ void term_backspace()
         term_cursor_y--;
         term_cursor_x = VGA_WIDTH - 1;
     } else {
-        // do nothing at 0,0
+        // bell at 0,0
+        pit_request_beep(1000);
         return;
     }
 

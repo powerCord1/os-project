@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #include <debug.h>
 #include <io.h>
 #include <pit.h>
@@ -10,6 +12,8 @@
 #define SPEAKER_PORT 0x61
 
 volatile size_t pit_ticks = 0;
+static volatile bool pit_beep_requested = false;
+static volatile uint32_t pit_beep_request_freq;
 
 void pit_init(uint32_t frequency)
 {
@@ -34,7 +38,7 @@ void pit_handler()
     }
 }
 
-static void pit_wait(size_t ticks)
+static void pit_wait_ms(size_t ticks)
 {
     size_t eticks = pit_ticks + ticks;
     while (pit_ticks < eticks) {
@@ -42,14 +46,14 @@ static void pit_wait(size_t ticks)
     }
 }
 
-void pit_play_sound(uint32_t frequency)
+void pit_play_sound(uint32_t freq)
 {
-    if (frequency == 0) {
+    if (freq == 0) {
         pit_nosound();
         return;
     }
 
-    uint16_t divisor = PIT_BASE_FREQUENCY / frequency;
+    uint16_t divisor = PIT_BASE_FREQUENCY / freq;
 
     // square wave
     outb(PIT_CMD_PORT, 0xB6);
@@ -67,9 +71,32 @@ void pit_nosound(void)
     outb(SPEAKER_PORT, inb(SPEAKER_PORT) & 0xFC);
 }
 
-void pit_beep(void)
+void pit_beep(uint32_t freq)
 {
-    pit_play_sound(1000);
-    pit_wait(100);
+    pit_play_sound(freq);
+    pit_wait_ms(20);
     pit_nosound();
+}
+
+void pit_sound_test()
+{
+    for (uint16_t i = 0; i < 10000; i++) {
+        pit_play_sound(i);
+        pit_wait_ms(1);
+    }
+    pit_nosound();
+}
+
+void pit_check_beep()
+{
+    if (pit_beep_requested) {
+        pit_beep(pit_beep_request_freq);
+        pit_beep_requested = false;
+    }
+}
+
+void pit_request_beep(uint32_t freq)
+{
+    pit_beep_request_freq = freq;
+    pit_beep_requested = true;
 }

@@ -25,9 +25,9 @@ void main(void)
     pit_init(1000);
     serial_init();
     gfx_draw_title("TYPEWRITER");
-    pit_beep();
     log_test();
     while (1) {
+        pit_check_beep();
         halt();
     }
 }
