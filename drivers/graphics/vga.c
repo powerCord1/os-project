@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #include <io.h>
 #include <vga.h>
 
