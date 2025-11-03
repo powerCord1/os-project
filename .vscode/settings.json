@@ -22,5 +22,12 @@
     },
     "C_Cpp.default.includePath": [
         "include/"
+    ],
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/run/media/lewis/OS/src/os_dev/build",
+            "binaryPath": "/run/media/lewis/OS/src/os_dev/build/os.bin",
+            "binaryArgs": []
+        }
     ]
 }

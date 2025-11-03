@@ -23,13 +23,13 @@ OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 all: $(TARGET)
 
 run: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio
+	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
 run_debug: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -s -S
+	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -s -S
 
 run_cdrom: $(ISO_TARGET)
-	qemu-system-i386 -cdrom $(ISO_TARGET) -display sdl -serial stdio
+	qemu-system-i386 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)

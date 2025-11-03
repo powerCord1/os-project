@@ -22,9 +22,10 @@ void main(void)
     term_init();
     gdt_init();
     idt_init();
-    pit_init(100); // 100hz
+    pit_init(1000);
     serial_init();
     gfx_draw_title("TYPEWRITER");
+    pit_beep();
     log_test();
     while (1) {
         halt();
