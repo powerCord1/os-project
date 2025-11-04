@@ -27,6 +27,15 @@ void disable_interrupts()
     __asm__("cli");
 }
 
+bool are_interrupts_enabled()
+{
+    unsigned long flags;
+    __asm__ volatile("pushf\n\t"
+                     "pop %0"
+                     : "=g"(flags));
+    return flags & (1 << 9);
+}
+
 void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
 {
     idt_entry_t *descriptor = &idt[vector];
@@ -104,7 +113,7 @@ void idt_init()
     idtr.base = (idt_entry_t *)&idt[0];
     idtr.limit = (uint16_t)sizeof(idt_entry_t) * VECTOR_TABLE_SIZE;
 
-    void *except_vector_table[VECTOR_TABLE_SIZE] = {
+    void *vector_table[VECTOR_TABLE_SIZE] = {
         // exceptions
         &isr_div_err,
         &isr_debug,
@@ -159,7 +168,7 @@ void idt_init()
     };
 
     for (uint8_t i = 0; i < VECTOR_TABLE_SIZE; i++) {
-        idt_set_descriptor_int(i, except_vector_table[i]);
+        idt_set_descriptor_int(i, vector_table[i]);
     }
 
     __asm__ volatile("lidt %0" : : "m"(idtr));

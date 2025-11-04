@@ -106,22 +106,3 @@ void irq_clear_mask(uint8_t IRQline)
     value = inb(port) & ~(1 << IRQline);
     outb(port, value);
 }
-
-static uint16_t __pic_get_irq_reg(int ocw3)
-{
-    /* OCW3 to PIC CMD to get the register values.  PIC2 is chained, and
-     * represents IRQs 8-15.  PIC1 is IRQs 0-7, with 2 being the chain */
-    outb(PIC1_COMMAND, ocw3);
-    outb(PIC2_COMMAND, ocw3);
-    return (inb(PIC2_COMMAND) << 8) | inb(PIC1_COMMAND);
-}
-
-uint16_t pic_get_irr()
-{
-    return __pic_get_irq_reg(PIC_READ_IRR);
-}
-
-uint16_t pic_get_isr()
-{
-    return __pic_get_irq_reg(PIC_READ_ISR);
-}

@@ -2,6 +2,7 @@
 
 #include <cpu.h>
 #include <interrupts.h>
+#include <pit.h>
 #include <stdio.h>
 
 void halt()
@@ -20,4 +21,10 @@ __attribute__((noreturn)) void halt_catch_fire()
 char get_cpu_vendor()
 {
     return 0x00;
+}
+
+void idle()
+{
+    pit_check_beep();
+    halt();
 }

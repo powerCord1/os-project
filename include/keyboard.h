@@ -151,4 +151,5 @@ static const char scancode_map[256] = {
     [KEY_DELETE] = 127,
 };
 
-char kbd_get_last_char(bool wait);
+char kbd_get_last_char(bool wait, char *scancode);
+char kbd_get_last_scancode(void);

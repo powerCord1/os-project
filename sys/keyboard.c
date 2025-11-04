@@ -5,6 +5,7 @@
 #include <debug.h>
 #include <io.h>
 #include <keyboard.h>
+#include <panic.h>
 #include <pit.h>
 #include <power.h>
 #include <tty.h>
@@ -15,6 +16,7 @@ uint8_t get_key()
 }
 
 static volatile char last_char = 0;
+static volatile char last_scancode = 0;
 
 void keyboard_handler(void)
 {
@@ -23,8 +25,7 @@ void keyboard_handler(void)
     if (key & 0x80) { // key release
     } else {
         last_char = scancode_map[key];
-
-        char c = scancode_map[key];
+        last_scancode = key;
         log_info("key pressed: 0x%x", key);
         switch (key) {
         case KEY_F1:
@@ -55,16 +56,23 @@ void keyboard_handler(void)
     }
 }
 
-char kbd_get_last_char(bool wait)
+char kbd_get_last_char(bool wait, char *scancode)
 {
     if (wait) {
         last_char = 0;
         while (last_char == 0) {
-            pit_check_beep();
-            halt();
+            idle();
         }
     }
+    if (scancode) {
+        *scancode = last_scancode;
+    }
     char c = last_char;
-    last_char = 0;
+    last_char = 0; // Reset for next keypress
     return c;
+}
+
+char kbd_get_last_scancode()
+{
+    return last_scancode;
 }

@@ -33,32 +33,31 @@ void main(void)
     main_menu();
 
     while (1) {
-        pit_check_beep();
-        halt();
+        idle();
     }
 }
 
 void main_menu(void)
 {
-    app_t apps[] = {
-        {"Typewriter", &typewriter_init},
-    };
+    app_t apps[] = {{"Typewriter", &typewriter_init}};
     size_t app_count = sizeof(apps) / sizeof(app_t);
 
-    term_clear();
-    gfx_draw_title("MAIN MENU");
-    printf("Select an app to launch:\n");
-    for (size_t i = 0; i < app_count; i++) {
-        printf("%d. %s\n", i + 1, apps[i].name);
-    }
-
-    char choice = kbd_get_last_char(true);
-    char choice_index = choice - '1';
-    if (choice_index > app_count - 1) {
-        printf("no");
-    } else {
+    while (1) {
         term_clear();
-        gfx_draw_title(apps[choice_index].name);
-        apps[choice_index].entry();
+        gfx_draw_title("MAIN MENU");
+        printf("Select an app to launch:\n");
+        for (size_t i = 0; i < app_count; i++) {
+            printf("%d. %s\n", i + 1, apps[i].name);
+        }
+
+        char choice = kbd_get_last_char(true);
+        size_t choice_index = choice - '1';
+        if (choice_index > app_count - 1) {
+            continue;
+        } else {
+            term_clear();
+            gfx_draw_title(apps[choice_index].name);
+            apps[choice_index].entry();
+        }
     }
 }

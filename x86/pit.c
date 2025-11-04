@@ -1,6 +1,7 @@
 #include <stdbool.h>
 
 #include <debug.h>
+#include <interrupts.h>
 #include <io.h>
 #include <pit.h>
 #include <stdio.h>
@@ -89,14 +90,30 @@ void pit_sound_test()
 
 void pit_check_beep()
 {
+    bool interrupts_were_enabled = are_interrupts_enabled();
+    if (interrupts_were_enabled) {
+        disable_interrupts();
+    }
+
     if (pit_beep_requested) {
         pit_beep(pit_beep_request_freq);
         pit_beep_requested = false;
+    }
+
+    if (interrupts_were_enabled) {
+        enable_interrupts();
     }
 }
 
 void pit_request_beep(uint32_t freq)
 {
+    bool interrupts_were_enabled = are_interrupts_enabled();
+    if (interrupts_were_enabled) {
+        disable_interrupts();
+    }
     pit_beep_request_freq = freq;
     pit_beep_requested = true;
+    if (interrupts_were_enabled) {
+        enable_interrupts();
+    }
 }
