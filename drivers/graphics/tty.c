@@ -37,7 +37,7 @@ void term_set_cursor(size_t x, size_t y)
 {
     term_cursor_x = x;
     term_cursor_y = y;
-    vga_set_cursor(term_cursor_x, term_cursor_y);
+    term_update_cursor();
 }
 
 void term_set_x(size_t c)
@@ -114,7 +114,7 @@ void term_delete()
     term_putentryat(' ', term_color, VGA_WIDTH - 1, term_cursor_y);
 }
 
-void term_backspace()
+void term_cursor_back(bool delete)
 {
     if (term_cursor_x > 0) {
         term_cursor_x--;
@@ -127,8 +127,31 @@ void term_backspace()
         return;
     }
 
-    term_putentryat(' ', term_color, term_cursor_x, term_cursor_y);
+    if (delete) {
+        term_putentryat(' ', term_color, term_cursor_x, term_cursor_y);
+    }
 
+    term_update_cursor();
+}
+
+void term_cursor_forward(void)
+{
+    if (term_cursor_x < VGA_WIDTH - 1) {
+        term_cursor_x++;
+    } else if (term_cursor_y < VGA_HEIGHT - 1) {
+        term_cursor_y++;
+        term_cursor_x = 0;
+    } else {
+        term_scroll(1);
+        term_cursor_x = 0;
+        return;
+    }
+
+    term_update_cursor();
+}
+
+void term_update_cursor()
+{
     vga_set_cursor(term_cursor_x, term_cursor_y);
 }
 
@@ -138,7 +161,7 @@ void term_putchar(char c)
         term_newline();
         return;
     } else if (c == '\b') {
-        term_backspace();
+        term_cursor_back(true);
         return;
     } else if (c == 127) { // ASCII DEL
         term_delete();
@@ -148,7 +171,7 @@ void term_putchar(char c)
     if (++term_cursor_x >= VGA_WIDTH) {
         term_newline();
     }
-    vga_set_cursor(term_cursor_x, term_cursor_y);
+    term_update_cursor();
 }
 
 char term_getchar(int x, int y)
@@ -192,7 +215,7 @@ void term_newline()
         term_scroll(1);
         term_cursor_y = VGA_HEIGHT - 1;
     }
-    vga_set_cursor(term_cursor_x, term_cursor_y);
+    term_update_cursor();
 }
 
 void term_print_centered(const char *text)

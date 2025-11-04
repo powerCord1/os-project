@@ -25,6 +25,7 @@ void keyboard_handler(void)
     if (key & 0x80) { // key release
     } else {
         last_char = scancode_map[key];
+
         last_scancode = key;
         log_info("key pressed: 0x%x", key);
         switch (key) {
@@ -56,7 +57,7 @@ void keyboard_handler(void)
     }
 }
 
-char kbd_get_last_char(bool wait, char *scancode)
+char kbd_get_last_char(bool wait)
 {
     if (wait) {
         last_char = 0;
@@ -64,11 +65,7 @@ char kbd_get_last_char(bool wait, char *scancode)
             idle();
         }
     }
-    if (scancode) {
-        *scancode = last_scancode;
-    }
     char c = last_char;
-    last_char = 0; // Reset for next keypress
     return c;
 }
 

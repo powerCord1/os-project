@@ -39,7 +39,8 @@ void main(void)
 
 void main_menu(void)
 {
-    app_t apps[] = {{"Typewriter", &typewriter_init}};
+    app_t apps[] = {{"Typewriter", &typewriter_init},
+                    {"Speaker test", &spk_test_init}};
     size_t app_count = sizeof(apps) / sizeof(app_t);
 
     while (1) {
@@ -58,6 +59,8 @@ void main_menu(void)
             term_clear();
             gfx_draw_title(apps[choice_index].name);
             apps[choice_index].entry();
+            enable_interrupts(); // after speaker test, interrupts get disabled
+                                 // somehow
         }
     }
 }

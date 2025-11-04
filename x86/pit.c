@@ -43,7 +43,9 @@ static void pit_wait_ms(size_t ticks)
 {
     size_t eticks = pit_ticks + ticks;
     while (pit_ticks < eticks) {
+        enable_interrupts();
         __asm__ volatile("hlt");
+        disable_interrupts();
     }
 }
 

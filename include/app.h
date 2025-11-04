@@ -4,3 +4,4 @@ typedef struct {
 } app_t;
 
 void typewriter_init(void);
+void spk_test_init(void);
