@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 uint8_t get_key(void);
@@ -149,3 +150,5 @@ static const char scancode_map[256] = {
     [KEY_SPACE] = ' ',
     [KEY_DELETE] = 127,
 };
+
+char kbd_get_last_char(bool wait);

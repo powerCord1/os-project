@@ -99,7 +99,7 @@ void isr_alignment_check()
 
 void isr_machine_check()
 {
-    panic("machine check");
+    panic("hardware failure");
 }
 
 void isr_simd_floating_point()
