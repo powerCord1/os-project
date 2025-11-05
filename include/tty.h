@@ -23,6 +23,8 @@ void term_set_color_entry(uint8_t color);
 void term_delete(void);
 void term_cursor_back(bool delete);
 void term_cursor_forward(void);
+void term_cursor_up(void);
+void term_cursor_down(void);
 void term_update_cursor(void);
 void term_newline(void);
 void term_print_centered(const char *text);

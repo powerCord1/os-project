@@ -69,6 +69,19 @@ char kbd_get_last_char(bool wait)
     return c;
 }
 
+char kbd_get_scancode(bool wait)
+{
+    if (wait) {
+        last_scancode = 0;
+        while (last_scancode == 0) {
+            idle();
+        }
+    }
+    char sc = last_scancode;
+    last_scancode = 0;
+    return sc;
+}
+
 char kbd_get_last_scancode()
 {
     return last_scancode;

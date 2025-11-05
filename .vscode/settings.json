@@ -19,7 +19,8 @@
         "debug.h": "c",
         "graphics.h": "c",
         "serial.h": "c",
-        "app.h": "c"
+        "app.h": "c",
+        "heap.h": "c"
     },
     "C_Cpp.default.includePath": [
         "include/"

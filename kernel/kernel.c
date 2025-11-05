@@ -8,6 +8,7 @@
 #include <debug.h>
 #include <gdt.h>
 #include <graphics.h>
+#include <heap.h>
 #include <interrupts.h>
 #include <keyboard.h>
 #include <panic.h>
@@ -24,6 +25,7 @@ void main(void)
 {
     term_init();
     gdt_init();
+    heap_init();
     idt_init();
     pit_init(1000);
     if (serial_init() == 0) {
@@ -40,7 +42,9 @@ void main(void)
 void main_menu(void)
 {
     app_t apps[] = {{"Typewriter", &typewriter_init},
-                    {"Speaker test", &spk_test_init}};
+                    {"Key notes", &key_notes_init},
+                    {"Speaker test", &spk_test_init},
+                    {"Heap test", &heap_test_init}};
     size_t app_count = sizeof(apps) / sizeof(app_t);
 
     while (1) {
@@ -59,8 +63,6 @@ void main_menu(void)
             term_clear();
             gfx_draw_title(apps[choice_index].name);
             apps[choice_index].entry();
-            enable_interrupts(); // after speaker test, interrupts get disabled
-                                 // somehow
         }
     }
 }

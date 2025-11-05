@@ -95,6 +95,8 @@ enum scancode_1 {
     KEY_DELETE = 0x53,
     KEY_ARROW_LEFT = 0x4B,
     KEY_ARROW_RIGHT = 0x4D,
+    KEY_ARROW_UP = 0x48,
+    KEY_ARROW_DOWN = 0x50,
 };
 
 static const char scancode_map[256] = {
@@ -155,3 +157,4 @@ static const char scancode_map[256] = {
 
 char kbd_get_last_char(bool wait);
 char kbd_get_last_scancode(void);
+char kbd_get_scancode(bool wait);

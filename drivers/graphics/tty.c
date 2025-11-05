@@ -134,7 +134,7 @@ void term_cursor_back(bool delete)
     term_update_cursor();
 }
 
-void term_cursor_forward(void)
+void term_cursor_forward()
 {
     if (term_cursor_x < VGA_WIDTH - 1) {
         term_cursor_x++;
@@ -147,6 +147,28 @@ void term_cursor_forward(void)
         return;
     }
 
+    term_update_cursor();
+}
+
+void term_cursor_up()
+{
+    if (term_cursor_y > 0) {
+        term_cursor_y--;
+    } else {
+        pit_request_beep(1000);
+        return;
+    }
+    term_update_cursor();
+}
+
+void term_cursor_down()
+{
+    if (term_cursor_y < VGA_HEIGHT - 1) {
+        term_cursor_y++;
+    } else {
+        pit_request_beep(1000);
+        return;
+    }
     term_update_cursor();
 }
 

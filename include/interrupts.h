@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 void idt_init(void);
 void isr_stub_keyboard(void);
 void enable_interrupts(void);
