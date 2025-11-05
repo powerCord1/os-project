@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <tty.h>
 
-void typewriter_init()
+void typewriter_main()
 {
     while (1) {
         char scancode = kbd_get_scancode(true);
@@ -28,7 +28,18 @@ void typewriter_init()
             term_cursor_down();
             continue;
         default:
-            printf("%c", scancode_map[(uint8_t)scancode]);
+            char c = scancode_map[(uint8_t)scancode];
+            if (c == 0) {
+                // if it's not in the map
+                continue;
+            }
+
+            bool is_alpha = (c >= 'a' && c <= 'z');
+
+            if (is_alpha && (kbd_modifiers.shift ^ kbd_modifiers.caps_lock)) {
+                c = kbd_capitalise(c);
+            }
+            printf("%c", c);
             continue;
         }
         break;

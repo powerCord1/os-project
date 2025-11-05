@@ -1,7 +1,19 @@
 #pragma once
 
+#include <io.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+typedef struct {
+    bool ctrl;
+    bool alt;
+    bool shift;
+    bool caps_lock;
+    bool num_lock;
+    bool scroll_lock;
+} kbd_modifiers_t;
+
+extern kbd_modifiers_t kbd_modifiers;
 
 uint8_t get_key(void);
 void keyboard_handler(void);
@@ -155,6 +167,9 @@ static const char scancode_map[256] = {
     [KEY_DELETE] = 127,
 };
 
+void kbd_set_leds(void);
 char kbd_get_last_char(bool wait);
 char kbd_get_last_scancode(void);
 char kbd_get_scancode(bool wait);
+char kbd_capitalise(char c);
+void kbd_dump_modifiers(void);

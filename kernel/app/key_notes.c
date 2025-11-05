@@ -4,7 +4,7 @@
 #include <keyboard.h>
 #include <pit.h>
 
-void key_notes_init()
+void key_notes_main()
 {
     while (1) {
         char scancode = kbd_get_scancode(true);

@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -27,6 +28,15 @@ void *memmove(void *dest, const void *src, size_t n)
     return dest;
 }
 
+void *memset(void *s, int c, size_t n)
+{
+    unsigned char *p = s;
+    while (n--) {
+        *p++ = (unsigned char)c;
+    }
+    return s;
+}
+
 char *strcpy(char *dest, const char *src)
 {
     char *temp = dest;
@@ -37,6 +47,78 @@ char *strcpy(char *dest, const char *src)
     }
     *dest = '\0';
     return temp;
+}
+
+char *strtok(char *str, const char *delim)
+{
+    static char *last_token;
+
+    if (str) {
+        last_token = str;
+    } else if (!last_token) {
+        return NULL;
+    }
+
+    // Skip leading delimiters
+    str = last_token + strspn(last_token, delim);
+    if (*str == '\0') {
+        last_token = NULL;
+        return NULL;
+    }
+
+    // Find the end of the token
+    char *token_end = strpbrk(str, delim);
+    if (token_end) {
+        *token_end = '\0';
+        last_token = token_end + 1;
+    } else {
+        // This is the last token
+        str = last_token;
+        last_token = NULL;
+    }
+
+    return str;
+}
+
+char *strpbrk(const char *str, const char *accept)
+{
+    for (; *str; str++) {
+        for (const char *a = accept; *a; a++) {
+            if (*str == *a) {
+                return (char *)str;
+            }
+        }
+    }
+    return NULL;
+}
+
+int strcmp(const char *s1, const char *s2)
+{
+    while (*s1 && (*s1 == *s2)) {
+        s1++;
+        s2++;
+    }
+    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
+}
+size_t strspn(const char *str, const char *accept)
+{
+    const char *p;
+    const char *a;
+    size_t count = 0;
+
+    for (p = str; *p != '\0'; ++p) {
+        for (a = accept; *a != '\0'; ++a) {
+            if (*p == *a) {
+                break;
+            }
+        }
+        if (*a == '\0') {
+            return count;
+        }
+        ++count;
+    }
+
+    return count;
 }
 
 size_t strlen(const char *str)

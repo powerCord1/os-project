@@ -3,7 +3,8 @@ typedef struct {
     void (*entry)(void);
 } app_t;
 
-void typewriter_init(void);
-void spk_test_init(void);
-void heap_test_init(void);
-void key_notes_init(void);
+void typewriter_main(void);
+void spk_test_main(void);
+void heap_test_main(void);
+void key_notes_main(void);
+void shell_main(void);

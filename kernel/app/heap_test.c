@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-void heap_test_init()
+void heap_test_main()
 {
     printf("Running heap test...\n");
 
