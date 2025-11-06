@@ -8,3 +8,4 @@ void spk_test_main(void);
 void heap_test_main(void);
 void key_notes_main(void);
 void shell_main(void);
+void ssp_test_main(void);

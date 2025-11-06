@@ -59,20 +59,17 @@ char *strtok(char *str, const char *delim)
         return NULL;
     }
 
-    // Skip leading delimiters
     str = last_token + strspn(last_token, delim);
     if (*str == '\0') {
         last_token = NULL;
         return NULL;
     }
 
-    // Find the end of the token
     char *token_end = strpbrk(str, delim);
     if (token_end) {
         *token_end = '\0';
         last_token = token_end + 1;
     } else {
-        // This is the last token
         str = last_token;
         last_token = NULL;
     }

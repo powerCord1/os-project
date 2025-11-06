@@ -4,7 +4,7 @@
 #include <heap.h>
 #include <stddef.h>
 
-#define HEAP_SIZE 1024 * 1024 // 1 MB heap
+#define HEAP_SIZE 1024 * 1024 // 1 MB
 
 static uint8_t heap[HEAP_SIZE];
 
@@ -60,8 +60,6 @@ void free(void *ptr)
     block_t *block_to_free = (block_t *)((uint8_t *)ptr - sizeof(block_t));
 
     block_to_free->free = true;
-
-    // Merge with next block if it's free
 
     if (block_to_free->next && block_to_free->next->free) {
         block_to_free->size += sizeof(block_t) + block_to_free->next->size;

@@ -173,3 +173,4 @@ char kbd_get_last_scancode(void);
 char kbd_get_scancode(bool wait);
 char kbd_capitalise(char c);
 void kbd_dump_modifiers(void);
+void wait_for_kbd(void);

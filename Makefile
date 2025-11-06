@@ -6,7 +6,7 @@ SRCDIR = .
 BUILDDIR = build
 INCLUDEDIR = include
 
-CFLAGS = -std=gnu99 -ffreestanding -O2 -Wall -Wextra -I$(INCLUDEDIR)
+CFLAGS = -std=gnu99 -ffreestanding -fstack-protector-all -O2 -Wall -Wextra -I$(INCLUDEDIR)
 ASFLAGS = 
 LDFLAGS = -T linker.ld -ffreestanding -O2 -nostdlib -lgcc
 

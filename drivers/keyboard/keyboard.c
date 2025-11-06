@@ -39,18 +39,19 @@ void kbd_set_leds(void)
         data |= 4;
     }
 
-    // Wait for keyboard to be ready
-    while ((inb(KBD_STATUS_PORT) & 2) != 0)
-        ;
+    wait_for_kbd();
     outb(KBD_DATA_PORT, KBD_LED_CMD);
-
-    // Wait for keyboard to be ready
-    while ((inb(KBD_STATUS_PORT) & 2) != 0)
-        ;
+    wait_for_kbd();
     outb(KBD_DATA_PORT, data);
 }
 
-void keyboard_handler(void)
+void wait_for_kbd()
+{
+    while ((inb(KBD_STATUS_PORT) & 2) != 0)
+        ;
+}
+
+void keyboard_handler()
 {
     uint8_t key = get_key();
 

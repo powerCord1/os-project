@@ -14,6 +14,7 @@
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
+#include <security.h>
 #include <serial.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,11 +42,10 @@ void main(void)
 
 void main_menu(void)
 {
-    app_t apps[] = {{"Typewriter", &typewriter_main},
-                    {"Key notes", &key_notes_main},
-                    {"Speaker test", &spk_test_main},
-                    {"Heap test", &heap_test_main},
-                    {"Shell", &shell_main}};
+    app_t apps[] = {
+        {"Typewriter", &typewriter_main}, {"Key notes", &key_notes_main},
+        {"Speaker test", &spk_test_main}, {"Heap test", &heap_test_main},
+        {"Shell", &shell_main},           {"Stack Smash Test", &ssp_test_main}};
     size_t app_count = sizeof(apps) / sizeof(app_t);
 
     while (1) {
