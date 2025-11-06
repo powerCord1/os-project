@@ -17,8 +17,6 @@ void heap_test_main()
     } else {
         printf("Failed to allocate memory.\n");
     }
-
-    printf("Heap test finished.\n");
     printf("Press any key exit\n");
     kbd_get_last_char(true);
 }

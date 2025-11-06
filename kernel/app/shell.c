@@ -2,8 +2,11 @@
 #include <string.h>
 
 #include <app.h>
+#include <cmos.h>
 #include <debug.h>
 #include <keyboard.h>
+#include <pit.h>
+#include <power.h>
 #include <shell.h>
 #include <stdio.h>
 #include <tty.h>
@@ -11,6 +14,14 @@
 const char *shell_prompt = "> ";
 char input_buffer[256];
 bool exit;
+
+const cmd_list_t cmds[] = {{"clear", &cmd_clear},         {"exit", &cmd_exit},
+                           {"poweroff", &shutdown},       {"reboot", &reboot},
+                           {"panic", &cmd_panic},         {"echo", &cmd_echo},
+                           {"help", &cmd_help},           {"date", &cmd_date},
+                           {"soundtest", &pit_sound_test}};
+
+uint8_t cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
 
 void shell_main()
 {
@@ -50,9 +61,6 @@ void shell_main()
 
 void process_cmd(char *cmd)
 {
-    cmd_list_t cmds[] = {{"clear", &cmd_clear}, {"exit", &cmd_exit}};
-    uint8_t cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
-
     char *argv[16];
     int argc = 0;
     char *token = strtok(cmd, " ");
@@ -84,4 +92,37 @@ void cmd_clear(int argc, char **argv)
 void cmd_exit(int argc, char **argv)
 {
     exit = true;
+}
+
+void cmd_panic(int argc, char **argv)
+{
+    panic("manually triggered panic");
+}
+
+void cmd_echo(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++) {
+        printf("%s", argv[i]);
+        if (i < argc - 1) {
+            putchar(' ');
+        }
+    }
+    putchar('\n');
+}
+
+void cmd_help(int argc, char **argv)
+{
+    printf("Available commands:\n");
+    for (int i = 0; i < cmd_count; i++) {
+        printf("- %s\n", cmds[i].name);
+    }
+}
+
+void cmd_date(int argc, char **argv)
+{
+    datetime_t datetime;
+    cmos_get_datetime(&datetime);
+
+    printf("%d/%d/%d %d:%d:%d\n", datetime.day, datetime.month, datetime.year,
+           datetime.hour, datetime.minute, datetime.second);
 }

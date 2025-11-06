@@ -8,6 +8,7 @@ void gdt_init()
     gdt_set_gate(0, 0, 0, 0, 0);
     gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xCF);
     gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
+    gdt_set_gate(3, 0, 0xFFFFF, 0x92, 0xCF); // 1MB flat segment for BIOS calls
     gdtr.limit = (sizeof(gdt)) - 1;
     gdtr.base = &gdt[0];
     gdt_flush();
@@ -27,13 +28,16 @@ void gdt_set_gate(int num, unsigned long base, unsigned long limit,
 
 void gdt_flush()
 {
-    __asm__ volatile("lgdt %0" : : "m"(gdtr));
-    __asm__ volatile("ljmp $0x08, %0" : : "i"(&reload_cs));
-}
-
-void reload_cs()
-{
-    __asm__ volatile("mov $0x10, %ax\n"
-                     "mov %ax, %ds\n"
-                     "mov %ax, %ss\n");
+    __asm__ volatile("lgdt %0\n\t"
+                     "mov $0x10, %%ax\n\t"
+                     "mov %%ax, %%ds\n\t"
+                     "mov %%ax, %%es\n\t"
+                     "mov %%ax, %%fs\n\t"
+                     "mov %%ax, %%gs\n\t"
+                     "mov %%ax, %%ss\n\t"
+                     "ljmp $0x08, $1f\n\t" // reload CS
+                     "1:\n\t"
+                     :
+                     : "m"(gdtr)
+                     : "ax");
 }
