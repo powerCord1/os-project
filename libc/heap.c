@@ -24,7 +24,6 @@ void heap_init()
 }
 
 void *malloc(size_t size)
-
 {
     block_t *curr = free_list;
 
@@ -51,7 +50,6 @@ void *malloc(size_t size)
 }
 
 void free(void *ptr)
-
 {
     if (!ptr) {
         return;

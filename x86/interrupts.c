@@ -11,6 +11,7 @@
 #include <keyboard.h>
 #include <panic.h>
 #include <pic.h>
+#include <pit.h>
 #include <stdio.h>
 #include <string.h>
 #include <tty.h>
@@ -57,56 +58,30 @@ void idt_set_descriptor_trap(uint8_t vector, void *isr)
     idt_set_descriptor(vector, isr, 0x8F);
 }
 
-__attribute__((naked)) void isr_stub_keyboard()
-{
-    __asm__ volatile("pusha\n"
-                     "mov %ds, %ax\n"
-                     "push %eax\n"
+#define ISR_STUB(name, handler) \
+    __attribute__((naked)) void name() \
+    { \
+        __asm__ volatile("pusha\n" \
+                         "mov %ds, %ax\n" \
+                         "push %eax\n" \
+                         "mov $0x10, %ax\n" \
+                         "mov %ax, %ds\n" \
+                         "mov %ax, %es\n" \
+                         "mov %ax, %fs\n" \
+                         "mov %ax, %gs\n" \
+                         "call " #handler "\n" \
+                         "call pic_sendEOI_master\n" \
+                         "pop %eax\n" \
+                         "mov %ax, %ds\n" \
+                         "mov %ax, %es\n" \
+                         "mov %ax, %fs\n" \
+                         "mov %ax, %gs\n" \
+                         "popa\n" \
+                         "iret"); \
+    }
 
-                     "mov $0x10, %ax\n"
-                     "mov %ax, %ds\n"
-                     "mov %ax, %es\n"
-                     "mov %ax, %fs\n"
-                     "mov %ax, %gs\n"
-
-                     "call keyboard_handler\n"
-                     "call pic_sendEOI_master\n"
-
-                     "pop %eax\n"
-                     "mov %ax, %ds\n"
-                     "mov %ax, %es\n"
-                     "mov %ax, %fs\n"
-                     "mov %ax, %gs\n"
-
-                     "popa\n"
-                     "iret");
-}
-
-__attribute__((naked)) void isr_stub_pit()
-{
-    __asm__ volatile("pusha\n"
-                     "mov %ds, %ax\n"
-                     "push %eax\n"
-
-                     "mov $0x10, %ax\n"
-                     "mov %ax, %ds\n"
-                     "mov %ax, %es\n"
-                     "mov %ax, %fs\n"
-                     "mov %ax, %gs\n"
-
-                     "call pit_handler\n"
-
-                     "call pic_sendEOI_master\n"
-
-                     "pop %eax\n"
-                     "mov %ax, %ds\n"
-                     "mov %ax, %es\n"
-                     "mov %ax, %fs\n"
-                     "mov %ax, %gs\n"
-
-                     "popa\n"
-                     "iret");
-}
+ISR_STUB(isr_stub_pit, pit_handler)
+ISR_STUB(isr_stub_keyboard, keyboard_handler)
 
 void idt_init()
 {
