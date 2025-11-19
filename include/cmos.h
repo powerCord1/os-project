@@ -11,6 +11,6 @@ typedef struct {
     uint16_t year;
 } datetime_t;
 
-void cmos_get_datetime(datetime_t *);
-void cmos_wait_for_update(void);
-void cmos_get_data(datetime_t *);
+void cmos_get_data(datetime_t *dt);
+void cmos_wait_for_update();
+void cmos_get_data(datetime_t *dt);

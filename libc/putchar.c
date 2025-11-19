@@ -1,10 +1,10 @@
 #include <stdio.h>
 
-#include <tty.h>
+#include <framebuffer.h>
 
 int putchar(int ic)
 {
     char c = (char)ic;
-    term_putchar(c);
+    fb_putchar(c);
     return ic;
 }

@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include <cpu.h>
+#include <debug.h>
 #include <interrupts.h>
 #include <io.h>
 #include <power.h>
@@ -18,22 +19,28 @@
 #define SHUTDOWN_SIG_VBOX 0x3400
 #define SHUTDOWN_SIG_CLOUD_HYPERVISOR 0x34
 
-__attribute__((noreturn)) void reboot(void)
+__attribute__((noreturn)) void reboot()
 {
+    // term_clear();
+    // term_writestringln("Shutting down...");
+    log_info("Rebooting...");
+    disable_interrupts();
     outb(0x64, 0xFE);
 
     // should have rebooted by now
-    term_clear();
-    printf(
-        "System was unable to reboot\n"
-        "You can manually power off the system by pressing the power button");
+    // term_clear();
+    // printf(
+    //     "System was unable to reboot\n"
+    //     "You can manually power off the system by pressing the power
+    //     button");
     halt_catch_fire();
 }
 
-__attribute__((noreturn)) void shutdown(void)
+__attribute__((noreturn)) void shutdown()
 {
-    term_clear();
-    term_writestringln("Shutting down...");
+    // term_clear();
+    // term_writestringln("Shutting down...");
+    log_info("Shutting down...");
     disable_interrupts();
     outw(SHUTDOWN_PORT_BOCHS, SHUTDOWN_SIG_BOCHS); // bochs
     outw(SHUTDOWN_PORT_QEMU, SHUTDOWN_SIG_QEMU);   // qemu
@@ -42,9 +49,10 @@ __attribute__((noreturn)) void shutdown(void)
          SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
 
     // system should have powered off by now, in case it hasn't, show a message
-    term_clear();
-    printf(
-        "System was unable to shut down\n"
-        "Please manually power off the system by pressing the power button.");
+    // term_clear();
+    // printf(
+    //     "System was unable to shut down\n"
+    //     "Please manually power off the system by pressing the power
+    //     button.");
     halt_catch_fire();
 }

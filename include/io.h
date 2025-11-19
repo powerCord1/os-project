@@ -38,7 +38,7 @@ static inline uint32_t inl(uint16_t port)
     return ret;
 }
 
-static inline void io_wait(void)
+static inline void io_wait()
 {
     outb(0x80, 0);
 }

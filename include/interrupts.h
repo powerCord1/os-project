@@ -1,10 +1,9 @@
 #include <stdbool.h>
 
-void idt_init(void);
-void isr_stub_keyboard(void);
-void enable_interrupts(void);
-void disable_interrupts(void);
-bool are_interrupts_enabled(void);
+void idt_init();
+void enable_interrupts();
+void disable_interrupts();
+bool are_interrupts_enabled();
 
 enum irq_types {
     IRQ_TYPE_PIT = 0,

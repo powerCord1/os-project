@@ -3,8 +3,10 @@
 
 #include <app.h>
 #include <cmos.h>
+#include <cpu.h>
 #include <debug.h>
 #include <keyboard.h>
+#include <panic.h>
 #include <pit.h>
 #include <power.h>
 #include <shell.h>
@@ -15,11 +17,24 @@ const char *shell_prompt = "> ";
 char input_buffer[256];
 bool exit;
 
-const cmd_list_t cmds[] = {{"clear", &cmd_clear},         {"exit", &cmd_exit},
-                           {"poweroff", &shutdown},       {"reboot", &reboot},
-                           {"panic", &cmd_panic},         {"echo", &cmd_echo},
-                           {"help", &cmd_help},           {"date", &cmd_date},
-                           {"soundtest", &pit_sound_test}};
+#define MAX_HISTORY 16
+static char command_history[MAX_HISTORY][256];
+static int history_count = 0;
+static int history_index = 0;
+static char current_input_buffer[256];
+static bool is_history_scrolling = false;
+
+const cmd_list_t cmds[] = {{"clear", &cmd_clear},
+                           {"exit", &cmd_exit},
+                           {"poweroff", &cmd_shutdown},
+                           {"reboot", &cmd_reboot},
+                           {"panic", &cmd_panic},
+                           {"echo", &cmd_echo},
+                           {"help", &cmd_help},
+                           {"date", &cmd_date},
+                           {"soundtest", &cmd_sound_test},
+                           {"history", &cmd_history},
+                           {"sysinfo", &cmd_sysinfo}};
 
 uint8_t cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
 
@@ -27,35 +42,91 @@ void shell_main()
 {
     exit = false;
     uint16_t i = 0;
-    char c = 0;
-    char sc = 0;
+    key_t key;
     while (!exit) {
         printf("%s", shell_prompt);
         i = 0;
         memset(input_buffer, 0, sizeof(input_buffer));
-        while (sc != KEY_ENTER) {
-            sc = kbd_get_scancode(true);
-            if (sc == KEY_ENTER) {
+        while (key.scancode != KEY_ENTER) {
+            key = kbd_get_key(true);
+            if (key.scancode == KEY_ENTER) {
                 putchar('\n');
+                is_history_scrolling = false;
+                memset(current_input_buffer, 0, sizeof(current_input_buffer));
                 break;
-            } else if (sc == KEY_BACKSPACE) {
+            } else if (key.scancode == KEY_BACKSPACE) {
                 if (i > 0) {
                     i--;
                     input_buffer[i] = '\0';
                     putchar('\b');
                 }
                 continue;
+            } else if (key.scancode == KEY_ARROW_UP) {
+                if (history_count == 0) {
+                    continue;
+                }
+
+                if (!is_history_scrolling) {
+                    strcpy(current_input_buffer, input_buffer);
+                    is_history_scrolling = true;
+                }
+
+                if (history_index > 0) {
+                    history_index--;
+                    for (int j = 0; j < i; j++) {
+                        putchar('\b');
+                    }
+                    memset(input_buffer, 0, sizeof(input_buffer));
+                    strcpy(input_buffer, command_history[history_index]);
+                    i = strlen(input_buffer);
+                    printf("%s", input_buffer);
+                }
+                continue;
+            } else if (key.scancode == KEY_ARROW_DOWN) {
+                if (!is_history_scrolling) {
+                    continue;
+                }
+
+                if (history_index < history_count) {
+                    history_index++;
+                    for (int j = 0; j < i; j++) {
+                        putchar('\b');
+                    }
+                    memset(input_buffer, 0, sizeof(input_buffer));
+
+                    if (history_index == history_count) {
+                        strcpy(input_buffer, current_input_buffer);
+                        is_history_scrolling = false;
+                    } else {
+                        strcpy(input_buffer, command_history[history_index]);
+                    }
+                    i = strlen(input_buffer);
+                    printf("%s", input_buffer);
+                }
+                continue;
             }
-            c = scancode_map[(uint8_t)sc];
-            if (i < (sizeof(input_buffer) - 1) && c != 0 && c != '\n') {
-                input_buffer[i++] = c;
-                putchar(c);
+            if (i < (sizeof(input_buffer) - 1) && key.key != 0 &&
+                key.key != '\n') {
+                input_buffer[i++] = key.key;
+                putchar(key.key);
             }
         }
         if (i > 0) {
+            if (history_count < MAX_HISTORY) {
+                strcpy(command_history[history_count++], input_buffer);
+            } else {
+                for (int j = 0; j < MAX_HISTORY - 1; j++) {
+                    strcpy(command_history[j], command_history[j + 1]);
+                }
+                strcpy(command_history[MAX_HISTORY - 1], input_buffer);
+            }
+            history_index = history_count;
+            is_history_scrolling = false;
+            memset(current_input_buffer, 0, sizeof(current_input_buffer));
             process_cmd(input_buffer);
         }
-        sc = 0;
+        key.key = 0;
+        key.scancode = 0;
     }
 }
 
@@ -82,6 +153,13 @@ void process_cmd(char *cmd)
     }
 
     printf("Command not found: %s\n", argv[0]);
+}
+
+void cmd_history(int argc, char **argv)
+{
+    for (int i = 0; i < history_count; i++) {
+        printf("%d %s\n", i + 1, command_history[i]);
+    }
 }
 
 void cmd_clear(int argc, char **argv)
@@ -121,8 +199,30 @@ void cmd_help(int argc, char **argv)
 void cmd_date(int argc, char **argv)
 {
     datetime_t datetime;
-    cmos_get_datetime(&datetime);
+    cmos_get_data(&datetime);
 
     printf("%d/%d/%d %d:%d:%d\n", datetime.day, datetime.month, datetime.year,
            datetime.hour, datetime.minute, datetime.second);
+}
+
+void cmd_shutdown(int argc, char **argv)
+{
+    shutdown();
+}
+
+void cmd_reboot(int argc, char **argv)
+{
+    reboot();
+}
+
+void cmd_sound_test(int argc, char **argv)
+{
+    printf("WHEEEE\n");
+    pit_sound_test();
+}
+
+void cmd_sysinfo(int argc, char **argv)
+{
+    printf("System information:\n");
+    printf("PE: %x\n", is_pe_enabled());
 }

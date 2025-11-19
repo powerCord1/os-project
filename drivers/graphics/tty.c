@@ -9,6 +9,8 @@
 #include <tty.h>
 #include <vga.h>
 
+uint16_t VGA_MEMORY[VGA_WIDTH * VGA_HEIGHT];
+
 static size_t term_cursor_y;
 static size_t term_cursor_x;
 static uint8_t term_color;
@@ -16,21 +18,22 @@ static uint16_t *term_buffer = (uint16_t *)VGA_MEMORY;
 
 void term_init()
 {
-    term_cursor_y = 0;
-    term_cursor_x = 0;
-    term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    term_clear();
-    enable_cursor();
+    // term_cursor_y = 0;
+    // term_cursor_x = 0;
+    // term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    // term_clear();
+    // enable_cursor();
 }
+
 void term_clear()
 {
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            term_buffer[index] = vga_entry(' ', term_color);
-        }
-    }
-    term_set_cursor(0, 0);
+    // for (size_t y = 0; y < VGA_HEIGHT; y++) {
+    //     for (size_t x = 0; x < VGA_WIDTH; x++) {
+    //         const size_t index = y * VGA_WIDTH + x;
+    //         term_buffer[index] = vga_entry(' ', term_color);
+    //     }
+    // }
+    // term_set_cursor(0, 0);
 }
 
 void term_set_cursor(size_t x, size_t y)
@@ -242,8 +245,8 @@ void term_newline()
 
 void term_print_centered(const char *text)
 {
-    uint8_t screen_midpoint = round_to_even(VGA_WIDTH / 2, false);
-    uint8_t text_midpoint = round_to_even(strlen(text) / 2, false);
+    uint8_t screen_midpoint = floordiv2(VGA_WIDTH);
+    uint8_t text_midpoint = floordiv2(strlen(text));
 
     term_cursor_x = screen_midpoint - text_midpoint;
     term_writestring(text);
@@ -254,4 +257,37 @@ void term_chartest()
     for (int i = 0; i < 256; i++) {
         term_putchar(i);
     }
+}
+
+void term_filled_line()
+{
+    uint8_t prev_color = term_get_color_entry();
+    term_set_x(0);
+    term_set_color(VGA_COLOR_WHITE, VGA_COLOR_WHITE);
+    for (size_t i = 0; i < VGA_WIDTH; i++) {
+        term_putchar(' ');
+    }
+    term_set_color_entry(prev_color);
+}
+
+void term_draw_title(const char *text)
+{
+    uint8_t height = 3;
+
+    // draw white block
+    term_set_cursor(0, 0);
+    for (size_t i = 0; i < height * VGA_WIDTH; i++) {
+        term_set_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
+        term_putchar(' ');
+    }
+
+    // draw text in middle of block
+    term_set_cursor(0, floordiv2(height));
+    term_print_centered(text);
+
+    // set cursor after title
+    term_set_cursor(0, height + 1);
+
+    // restore settings
+    term_reset_color();
 }

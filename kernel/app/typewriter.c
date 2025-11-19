@@ -9,10 +9,10 @@
 void typewriter_main()
 {
     while (1) {
-        char scancode = kbd_get_scancode(true);
-        log_info("scancode: 0x%x", scancode);
+        key_t key = kbd_get_key(true);
+        log_info("scancode: 0x%x", key.scancode);
 
-        switch (scancode) {
+        switch (key.scancode) {
         case KEY_ESC:
             break;
         case KEY_ARROW_LEFT:
@@ -28,7 +28,7 @@ void typewriter_main()
             term_cursor_down();
             continue;
         default:
-            char c = scancode_map[(uint8_t)scancode];
+            char c = key.key;
             if (c == 0) {
                 // if it's not in the map
                 continue;

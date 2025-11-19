@@ -1,14 +1,30 @@
-CC = i686-elf-gcc
-AS = i686-elf-as
-LD = i686-elf-gcc
+CC = gcc
+AS = x86_64-elf-as
+LD = gcc
 
 SRCDIR = .
 BUILDDIR = build
 INCLUDEDIR = include
+LIMINEDIR = /usr/share/limine
 
-CFLAGS = -std=gnu99 -ffreestanding -O2 -Wall -Wextra -I$(INCLUDEDIR)
-ASFLAGS = 
-LDFLAGS = -T linker.ld -ffreestanding -O2 -nostdlib -lgcc
+CFLAGS = -std=gnu99 \
+		 -ffreestanding \
+		 -O2 \
+		 -Wall \
+		 -Wextra \
+		 -I$(INCLUDEDIR) \
+		 -mno-red-zone \
+		 -fno-stack-protector \
+		 -fno-stack-check \
+		 -fno-PIC \
+		 -fno-lto \
+		 -fdata-sections \
+		 -ffunction-sections \
+		 -march=x86-64 \
+		 -mcmodel=kernel \
+		 -no-pie
+ASFLAGS =
+LDFLAGS = -T linker.ld -ffreestanding -O2 -nostdlib -lgcc -no-pie
 
 TARGET = $(BUILDDIR)/os.bin
 ISO_TARGET = $(BUILDDIR)/os.iso
@@ -23,14 +39,13 @@ OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 all: $(TARGET)
 
 run: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
+	qemu-system-x86_64 -kernel $(TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
 run_debug: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -s -S
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -s -S
 
 run_cdrom: $(ISO_TARGET)
-	qemu-system-i386 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
-
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
 
@@ -52,10 +67,18 @@ cdrom: $(ISO_TARGET)
 
 $(ISO_TARGET): $(TARGET)
 	@echo "Creating ISO image..."
-	@mkdir -p $(BUILDDIR)/iso/boot/grub
+	@mkdir -p $(BUILDDIR)/iso/boot/limine
+
 	cp $(TARGET) $(BUILDDIR)/iso/boot/os.bin
-	echo 'menuentry "os" {multiboot /boot/os.bin}' > $(BUILDDIR)/iso/boot/grub/grub.cfg
-	grub-mkrescue -o $(ISO_TARGET) $(BUILDDIR)/iso
+	cp limine.conf $(LIMINEDIR)/limine-bios.sys $(LIMINEDIR)/limine-bios-cd.bin $(LIMINEDIR)/limine-uefi-cd.bin $(BUILDDIR)/iso/boot/limine/
+
+	mkdir -p $(BUILDDIR)/iso/EFI/BOOT
+	cp $(LIMINEDIR)/BOOTX64.EFI $(LIMINEDIR)/BOOTIA32.EFI $(BUILDDIR)/iso/EFI/BOOT
+	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin \
+			-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
+			-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
+			-efi-boot-part --efi-boot-image --protective-msdos-label $(BUILDDIR)/iso -o $(BUILDDIR)/os.iso
+
 	@echo "ISO image created at $(ISO_TARGET)"
 
 clean:

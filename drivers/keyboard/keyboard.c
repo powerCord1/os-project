@@ -20,13 +20,14 @@ static volatile char last_char = 0;
 static volatile char last_scancode = 0;
 
 kbd_modifiers_t kbd_modifiers = {false, false, false, false, false, false};
+key_t last_key = {0, 0};
 
 uint8_t get_key()
 {
     return inb(0x60);
 }
 
-void kbd_set_leds(void)
+void kbd_set_leds()
 {
     uint8_t data = 0;
     if (kbd_modifiers.scroll_lock) {
@@ -92,7 +93,9 @@ void keyboard_handler()
         last_char = scancode_map[key];
 
         last_scancode = key;
-        log_info("key pressed: 0x%x", key);
+
+        log_debug("key pressed: 0x%x", key);
+
         switch (key) {
         case KEY_F1:
             break;
@@ -119,19 +122,7 @@ void keyboard_handler()
     }
 }
 
-char kbd_get_last_char(bool wait)
-{
-    if (wait) {
-        last_char = 0;
-        while (last_char == 0) {
-            idle();
-        }
-    }
-    char c = last_char;
-    return c;
-}
-
-char kbd_get_scancode(bool wait)
+key_t kbd_get_key(bool wait)
 {
     if (wait) {
         last_scancode = 0;
@@ -139,14 +130,9 @@ char kbd_get_scancode(bool wait)
             idle();
         }
     }
-    char sc = last_scancode;
-    last_scancode = 0;
-    return sc;
-}
-
-char kbd_get_last_scancode()
-{
-    return last_scancode;
+    last_key.key = scancode_map[last_scancode];
+    last_key.scancode = last_scancode;
+    return last_key;
 }
 
 char kbd_capitalise(char c)
@@ -163,4 +149,16 @@ void kbd_dump_modifiers()
     log_info("alt: %x", kbd_modifiers.alt);
     log_info("num_lock: %x", kbd_modifiers.num_lock);
     log_info("scroll_lock: %x", kbd_modifiers.scroll_lock);
+}
+
+uint8_t kbd_poll_key()
+{
+    while (1) {
+        if (inb(KBD_STATUS_PORT) & 1) {
+            uint8_t scancode = inb(KBD_DATA_PORT);
+            if ((scancode & 0x80) == 0) { // no releases
+                return scancode;
+            }
+        }
+    }
 }

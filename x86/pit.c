@@ -12,12 +12,13 @@
 #define PIT_CHANNEL2_DATA_PORT 0x42
 #define SPEAKER_PORT 0x61
 
-volatile size_t pit_ticks = 0;
+volatile uint64_t pit_ticks = 0;
 static volatile bool pit_beep_requested = false;
 static volatile uint32_t pit_beep_request_freq;
 
 void pit_init(uint32_t frequency)
 {
+    log_verbose("Setting PIT frequency to %d", frequency);
     if (frequency == 0) {
         log_warn("PIT frequency is zero");
         return;
@@ -33,9 +34,9 @@ void pit_init(uint32_t frequency)
 
 void pit_handler()
 {
-    pit_ticks++;
-    if (pit_ticks % 1000 == 0) {
-        log_info("PIT ticks: %u", pit_ticks);
+    if (++pit_ticks == UINT64_MAX) {
+        log_warn("PIT tick overflow");
+        log_warn("gang wtf reboot now");
     }
 }
 
@@ -69,7 +70,7 @@ void pit_play_sound(uint32_t freq)
     outb(SPEAKER_PORT, speaker_state | 3);
 }
 
-void pit_nosound(void)
+void pit_nosound()
 {
     outb(SPEAKER_PORT, inb(SPEAKER_PORT) & 0xFC);
 }
@@ -83,7 +84,7 @@ void pit_beep(uint32_t freq)
 
 void pit_sound_test()
 {
-    for (uint16_t i = 0; i < 10000; i++) {
+    for (uint16_t i = 0; i < 20000; i++) {
         pit_play_sound(i);
         pit_wait_ms(1);
     }

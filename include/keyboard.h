@@ -13,10 +13,15 @@ typedef struct {
     bool scroll_lock;
 } kbd_modifiers_t;
 
+typedef struct {
+    char key;
+    char scancode;
+} key_t;
+
 extern kbd_modifiers_t kbd_modifiers;
 
-uint8_t get_key(void);
-void keyboard_handler(void);
+uint8_t get_key();
+void keyboard_handler();
 
 enum scancode_1 {
     KEY_ESC = 0x01,
@@ -167,10 +172,9 @@ static const char scancode_map[256] = {
     [KEY_DELETE] = 127,
 };
 
-void kbd_set_leds(void);
-char kbd_get_last_char(bool wait);
-char kbd_get_last_scancode(void);
-char kbd_get_scancode(bool wait);
+void kbd_set_leds();
+key_t kbd_get_key(bool);
 char kbd_capitalise(char c);
-void kbd_dump_modifiers(void);
-void wait_for_kbd(void);
+void kbd_dump_modifiers();
+void wait_for_kbd();
+uint8_t kbd_poll_key();

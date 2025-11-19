@@ -18,5 +18,5 @@ void heap_test_main()
         printf("Failed to allocate memory.\n");
     }
     printf("Press any key exit\n");
-    kbd_get_last_char(true);
+    kbd_get_key(true);
 }

@@ -4,40 +4,38 @@
 #include <stdint.h>
 
 #include <cpu.h>
-#include <cpuid.h>
 #include <debug.h>
-#include <gdt.h>
+#include <framebuffer.h>
 #include <graphics.h>
-#include <heap.h>
+#include <init.h>
 #include <interrupts.h>
 #include <keyboard.h>
-#include <panic.h>
+#include <multiboot2.h>
 #include <pit.h>
 #include <power.h>
-#include <security.h>
-#include <serial.h>
 #include <stdio.h>
-#include <string.h>
-#include <tty.h>
 
-void main_menu(void);
+void main_menu();
 
-void main(void)
+void main(unsigned long magic, unsigned long addr)
 {
-    serial_init();
+    struct multiboot_tag *tag;
 
-    log_verbose("Kernel: Initializing GDT...");
-    gdt_init();
-    log_verbose("Kernel: Initializing IDT...");
-    idt_init();
-    log_verbose("Kernel: Initializing Heap...");
-    heap_init();
-    log_verbose("Kernel: Initializing PIT...");
-    pit_init(1000);
-    log_verbose("Kernel: Initializing TTY...");
-    term_init();
+    sys_init();
 
-    log_verbose("Kernel: Entering main menu...");
+    if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+        log_info("Booted via multiboot2.");
+        for (tag = (struct multiboot_tag *)(addr + 8);
+             tag->type != MULTIBOOT_TAG_TYPE_END;
+             tag = (struct multiboot_tag *)((uint8_t *)tag +
+                                            ((tag->size + 7) & ~7))) {
+            log_verbose("Tag 0x%x, Size 0x%x", tag->type, tag->size);
+        }
+    }
+
+    enable_interrupts();
+
+    log_verbose("Init done, entering main menu...");
     main_menu();
 
     while (1) {
@@ -45,30 +43,31 @@ void main(void)
     }
 }
 
-void main_menu(void)
+void main_menu()
 {
-    app_t apps[] = {{"Typewriter", &typewriter_main},
-                    {"Key notes", &key_notes_main},
-                    {"Heap test", &heap_test_main},
-                    {"Shell", &shell_main},
-                    {"Stack Smash Test", &ssp_test_main}};
+    app_t apps[] = {
+        {"Typewriter", &typewriter_main},     {"Key notes", &key_notes_main},
+        {"Heap test", &heap_test_main},       {"Shell", &shell_main},
+        {"Stack Smash Test", &ssp_test_main}, {"Shutdown", &shutdown}};
     size_t app_count = sizeof(apps) / sizeof(app_t);
 
     while (1) {
-        term_clear();
-        gfx_draw_title("MAIN MENU");
+        log_verbose("Refreshing main menu");
+        fb_clear();
+        fb_draw_title("MAIN MENU");
         printf("Select an app to launch:\n");
         for (size_t i = 0; i < app_count; i++) {
             printf("%d. %s\n", i + 1, apps[i].name);
         }
 
-        char choice = kbd_get_last_char(true);
+        char choice = kbd_get_key(true).key;
         size_t choice_index = choice - '1';
         if (choice_index > app_count - 1) {
             continue;
         } else {
-            term_clear();
-            gfx_draw_title(apps[choice_index].name);
+            fb_clear();
+            fb_draw_title(apps[choice_index].name);
+            log_verbose("Launching app: %s", apps[choice_index].name);
             apps[choice_index].entry();
         }
     }

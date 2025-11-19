@@ -4,10 +4,11 @@
 
 #include <cpu.h>
 #include <debug.h>
-#include <exception.h>
+#include <gdt.h>
 #include <idt.h>
 #include <interrupts.h>
 #include <io.h>
+#include <isr.h>
 #include <keyboard.h>
 #include <panic.h>
 #include <pic.h>
@@ -17,6 +18,9 @@
 #include <tty.h>
 
 #define VECTOR_TABLE_SIZE 48
+
+idt_entry_t idt[IDT_ENTRIES];
+idtr_t idtr;
 
 void enable_interrupts()
 {
@@ -40,53 +44,21 @@ bool are_interrupts_enabled()
 void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
 {
     idt_entry_t *descriptor = &idt[vector];
+    uint64_t isr_addr = (uint64_t)isr;
 
-    descriptor->isr_low = (uint32_t)isr & 0xFFFF;
-    descriptor->kernel_cs = 0x08;   // segment selector
-    descriptor->attributes = flags; // int, trap or task gate
-    descriptor->isr_high = (uint32_t)isr >> 16;
+    descriptor->isr_low = isr_addr & 0xFFFF;
+    descriptor->kernel_cs = GDT_CODE_SEGMENT;
+    descriptor->ist = 0;
+    descriptor->attributes = flags;
+    descriptor->isr_mid = (isr_addr >> 16) & 0xFFFF;
+    descriptor->isr_high = (isr_addr >> 32) & 0xFFFFFFFF;
     descriptor->reserved = 0;
 }
 
-void idt_set_descriptor_int(uint8_t vector, void *isr)
-{
-    idt_set_descriptor(vector, isr, 0x8E);
-}
-
-void idt_set_descriptor_trap(uint8_t vector, void *isr)
-{
-    idt_set_descriptor(vector, isr, 0x8F);
-}
-
-#define ISR_STUB(name, handler) \
-    __attribute__((naked)) void name() \
-    { \
-        __asm__ volatile("pusha\n" \
-                         "mov %ds, %ax\n" \
-                         "push %eax\n" \
-                         "mov $0x10, %ax\n" \
-                         "mov %ax, %ds\n" \
-                         "mov %ax, %es\n" \
-                         "mov %ax, %fs\n" \
-                         "mov %ax, %gs\n" \
-                         "call " #handler "\n" \
-                         "call pic_sendEOI_master\n" \
-                         "pop %eax\n" \
-                         "mov %ax, %ds\n" \
-                         "mov %ax, %es\n" \
-                         "mov %ax, %fs\n" \
-                         "mov %ax, %gs\n" \
-                         "popa\n" \
-                         "iret"); \
-    }
-
-ISR_STUB(isr_stub_pit, pit_handler)
-ISR_STUB(isr_stub_keyboard, keyboard_handler)
-
 void idt_init()
 {
-    idtr.base = (idt_entry_t *)&idt[0];
-    idtr.limit = (uint16_t)sizeof(idt_entry_t) * VECTOR_TABLE_SIZE;
+    idtr.base = (uint64_t)&idt[0];
+    idtr.limit = (uint16_t)sizeof(idt_entry_t) * IDT_ENTRIES - 1;
 
     void *vector_table[VECTOR_TABLE_SIZE] = {
         // exceptions
@@ -105,50 +77,62 @@ void idt_init()
         &isr_seg_fault,
         &isr_gpf,
         &isr_page_fault,
-        NULL,
+        &isr_unhandled,
         &isr_fpu_err,
         &isr_alignment_check,
         &isr_machine_check,
         &isr_simd_floating_point,
         &isr_virtualisation,
         &isr_control_protection,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
         &isr_security_protection,
-        NULL,
+        &isr_unhandled,
 
         // interrupts
-        &isr_stub_pit,
-        &isr_stub_keyboard,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
+        &isr_pit,      // PIT
+        &isr_keyboard, // Keyboard
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
+        &isr_unhandled,
     };
 
-    for (uint8_t i = 0; i < VECTOR_TABLE_SIZE; i++) {
-        idt_set_descriptor_int(i, vector_table[i]);
+    log_verbose("Setting IDT descriptors");
+    for (size_t i = 0; i < VECTOR_TABLE_SIZE; i++) {
+        log_verbose("Setting descriptor %d", i);
+        if (i >= IDT_ENTRIES) {
+            panic("vector table too large for IDT");
+        }
+        idt_set_descriptor(i, vector_table[i], 0x8E);
     }
 
-    __asm__ volatile("lidt %0" : : "m"(idtr));
+    log_verbose("Loading IDT");
+    idt_load();
+    log_verbose("Initialising PIC");
     pic_init();
+    log_verbose("Clearing PIC masks");
     irq_clear_mask(IRQ_TYPE_PIT);
     irq_clear_mask(IRQ_TYPE_KEYBOARD);
-    enable_interrupts();
+}
+
+void idt_load()
+{
+    __asm__ volatile("lidt %0" : : "m"(idtr));
 }

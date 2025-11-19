@@ -5,9 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static uint16_t *const VGA_MEMORY = (uint16_t *)0xB8000;
-static const size_t VGA_WIDTH = 80;
-static const size_t VGA_HEIGHT = 25;
+#define VGA_WIDTH 80
+#define VGA_HEIGHT 25
+
+extern uint16_t VGA_MEMORY[VGA_WIDTH * VGA_HEIGHT];
 
 enum vga_color {
     VGA_COLOR_BLACK = 0,
@@ -38,6 +39,6 @@ static inline uint16_t vga_entry(unsigned char uc, uint8_t color)
     return (uint16_t)uc | (uint16_t)color << 8;
 }
 
-void enable_cursor(void);
-void disable_cursor(void);
+void enable_cursor();
+void disable_cursor();
 void vga_set_cursor(int x, int y);

@@ -1,14 +1,25 @@
-.set ALIGN,    1<<0
-.set MEMINFO,  1<<1
-.set FLAGS,    ALIGN | MEMINFO
-.set MAGIC,    0x1BADB002
-.set CHECKSUM, -(MAGIC + FLAGS)
-
 .section .multiboot
-.align 4
-.long MAGIC
-.long FLAGS
-.long CHECKSUM
+.align 8
+header_start:
+    .long 0xE85250D6           # magic
+    .long 0                    # architecture
+    .long header_end - header_start # header length
+    .long -(0xE85250D6 + 0 + (header_end - header_start)) # checksum
+
+    # Relocatable header tag
+    .word 5 # type
+    .word 0 # flags
+    .long 24 # size
+    .long 0 # min_addr
+    .long 0 # max_addr
+    .long 4096 # align
+    .long 0 # preference
+
+    # End tag
+    .word 0 # type
+    .word 0 # flags
+    .long 8 # size
+header_end:
 
 .section .bss
 .align 16
@@ -20,7 +31,11 @@ stack_top:
 .global _start
 .type _start, @function
 _start:
-	mov $stack_top, %esp
+	mov $stack_top, %rsp
+
+    push %rbx
+    push %rax
+
 	call main
 	cli
 

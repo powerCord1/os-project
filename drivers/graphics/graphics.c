@@ -1,42 +1,6 @@
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
 #include <graphics.h>
-#include <math.h>
-#include <stdio.h>
-#include <tty.h>
-#include <vga.h>
 
-void gfx_filled_line(void)
-{
-    uint8_t prev_color = term_get_color_entry();
-    term_set_x(0);
-    term_set_color(VGA_COLOR_WHITE, VGA_COLOR_WHITE);
-    for (size_t i = 0; i < VGA_WIDTH; i++) {
-        putchar(' ');
-    }
-    term_set_color_entry(prev_color);
-}
-
-void gfx_draw_title(const char *text)
-{
-    uint8_t height = 3;
-
-    // draw white block
-    term_set_cursor(0, 0);
-    for (size_t i = 0; i < height * VGA_WIDTH; i++) {
-        term_set_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
-        term_putchar(' ');
-    }
-
-    // draw text in middle of block
-    term_set_cursor(0, floordiv2(height));
-    term_print_centered(text);
-
-    // set cursor after title
-    term_set_cursor(0, height + 1);
-
-    // restore settings
-    term_reset_color();
-}
+// I gave up trying to implement graphics, because with a UEFI BIOS, GRUB was
+// giving a page fault as soon as it started the OS (not my code, tried removing
+// everything under _start) and I couldn't figure out what the hell was
+// happening
