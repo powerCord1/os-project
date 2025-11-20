@@ -6,7 +6,6 @@
 gdt_entry_t gdt[GDT_ENTRIES];
 gdtr_t gdtr;
 
-// Helper to create a GDT entry
 static void gdt_set_gate(int num, uint8_t access, uint8_t flags)
 {
     log_verbose("Setting GDT entry %d", num);
@@ -21,11 +20,8 @@ static void gdt_set_gate(int num, uint8_t access, uint8_t flags)
 void gdt_init()
 {
     log_verbose("Setting GDT descriptors");
-    // NULL descriptor
     gdt_set_gate(0, 0, 0);
-    // 64-bit code segment
     gdt_set_gate(1, 0x9A, 0x20);
-    // 64-bit data segment
     gdt_set_gate(2, 0x92, 0x00);
 
     gdtr.limit = sizeof(gdt) - 1;

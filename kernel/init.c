@@ -14,6 +14,10 @@ void sys_init()
 {
     serial_init();
 
+    log_verbose("Initializing Limine");
+    limine_init();
+    log_verbose("Initializing framebuffer");
+    fb_init();
     log_verbose("Initializing CPU features");
     cpu_init();
     log_verbose("Initializing GDT");
@@ -24,10 +28,4 @@ void sys_init()
     heap_init();
     log_verbose("Initializing PIT");
     pit_init(1000);
-    log_verbose("Initializing TTY");
-    term_init();
-    log_verbose("Initializing Limine");
-    limine_init();
-    log_verbose("Initializing framebuffer");
-    fb_init();
 }

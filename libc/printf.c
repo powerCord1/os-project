@@ -18,6 +18,25 @@ static bool print(int (*putc_func)(int), const char *data, size_t length)
     return true;
 }
 
+static char *ultohexa_helper(char *dest, unsigned long x)
+{
+    if (x >= 16) {
+        dest = ultohexa_helper(dest, x / 16);
+    }
+    *dest++ = "0123456789abcdef"[x & 15];
+    return dest;
+}
+
+static char *ultohexa(char *dest, unsigned long x)
+{
+    if (x == 0) {
+        strcpy(dest, "0");
+        return dest;
+    }
+    *ultohexa_helper(dest, x) = '\0';
+    return dest;
+}
+
 int vprintf_generic(int (*putc_func)(int),
                     const char *restrict format, // NOLINT
                     va_list parameters)
@@ -49,6 +68,10 @@ int vprintf_generic(int (*putc_func)(int),
 
         const char *format_begun_at = format++;
 
+        bool zero_pad = false;
+        int width = 0;
+        bool is_long = false;
+
         if (*format == 'c') {
             format++;
             char c = (char)va_arg(parameters, int /* char promotes to int */);
@@ -60,6 +83,7 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             written++;
+            continue;
         } else if (*format == 's') {
             format++;
             const char *str = va_arg(parameters, const char *);
@@ -72,20 +96,49 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             written += len;
+            continue;
         } else if (*format == 'x') {
+            // This case is now handled by the more generic parser below
+            // to support flags and width, so we just fall through.
+        }
+
+        // Parse flags, width, and length modifiers
+        if (*format == '0') {
+            zero_pad = true;
             format++;
-            unsigned int i = va_arg(parameters, unsigned int);
-            char hex_str[9]; // 8 hex chars + null terminator
-            itohexa(hex_str, i);
+        }
+        while (*format >= '0' && *format <= '9') {
+            width = width * 10 + (*format - '0');
+            format++;
+        }
+        if (*format == 'l') {
+            is_long = true;
+            format++;
+        }
+
+        if (*format == 'x') {
+            format++;
+            char hex_str[20]; // 16 hex chars for 64-bit + null terminator
+            if (is_long) {
+                unsigned long i = va_arg(parameters, unsigned long);
+                ultohexa(hex_str, i);
+            } else {
+                unsigned int i = va_arg(parameters, unsigned int);
+                itohexa(hex_str, i);
+            }
             size_t len = strlen(hex_str);
-            if (maxrem < len) {
+            int padding = (width > (int)len) ? (width - len) : 0;
+
+            if (maxrem < len + padding) {
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(putc_func, hex_str, len)) {
-                return -1;
+            for (int i = 0; i < padding; i++) {
+                putc_func(zero_pad ? '0' : ' ');
             }
-            written += len;
+            print(putc_func, hex_str, len);
+            written += len + padding;
+            continue;
         } else if (*format == 'd') {
             format++;
             int i = va_arg(parameters, int);
@@ -100,6 +153,7 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             written += len;
+            continue;
         } else if (*format == 'u') {
             format++;
             unsigned int i = va_arg(parameters, unsigned int);
@@ -114,6 +168,7 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             written += len;
+            continue;
         } else {
             format = format_begun_at;
             size_t len = strlen(format);

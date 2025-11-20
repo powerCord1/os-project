@@ -10,12 +10,15 @@
 #include <init.h>
 #include <interrupts.h>
 #include <keyboard.h>
+#include <menu.h>
 #include <multiboot2.h>
+#include <panic.h>
 #include <pit.h>
 #include <power.h>
 #include <stdio.h>
 
 void main_menu();
+void power_menu();
 
 void main(unsigned long magic, unsigned long addr)
 {
@@ -36,39 +39,34 @@ void main(unsigned long magic, unsigned long addr)
     enable_interrupts();
 
     log_verbose("Init done, entering main menu...");
-    main_menu();
-
     while (1) {
-        idle();
+        main_menu();
+        power_menu();
     }
+}
+
+__attribute__((noreturn)) void main_exit()
+{
+    panic("init exited");
 }
 
 void main_menu()
 {
-    app_t apps[] = {
-        {"Typewriter", &typewriter_main},     {"Key notes", &key_notes_main},
-        {"Heap test", &heap_test_main},       {"Shell", &shell_main},
-        {"Stack Smash Test", &ssp_test_main}, {"Shutdown", &shutdown}};
-    size_t app_count = sizeof(apps) / sizeof(app_t);
+    menu_t apps[] = {{"Typewriter", &typewriter_main},
+                     {"Key notes", &key_notes_main},
+                     {"Heap test", &heap_test_main},
+                     {"Shell", &shell_main},
+                     {"Stack Smash Test", &ssp_test_main},
+                     {"Element drawing test", &element_test}};
+    create_menu("Main menu", "Choose an app to launch", apps,
+                sizeof(apps) / sizeof(menu_t));
+}
 
-    while (1) {
-        log_verbose("Refreshing main menu");
-        fb_clear();
-        fb_draw_title("MAIN MENU");
-        printf("Select an app to launch:\n");
-        for (size_t i = 0; i < app_count; i++) {
-            printf("%d. %s\n", i + 1, apps[i].name);
-        }
-
-        char choice = kbd_get_key(true).key;
-        size_t choice_index = choice - '1';
-        if (choice_index > app_count - 1) {
-            continue;
-        } else {
-            fb_clear();
-            fb_draw_title(apps[choice_index].name);
-            log_verbose("Launching app: %s", apps[choice_index].name);
-            apps[choice_index].entry();
-        }
-    }
+void power_menu()
+{
+    log_info("Entering power menu");
+    menu_t options[] = {{"Reboot", &reboot}, {"Shutdown", &shutdown}};
+    create_menu("Power menu", "Select an option:", options,
+                sizeof(options) / sizeof(menu_t));
+    fb_clear();
 }

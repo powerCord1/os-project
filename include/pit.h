@@ -10,4 +10,5 @@ void pit_nosound();
 void pit_beep(uint32_t freq);
 void pit_check_beep();
 void pit_request_beep(uint32_t freq);
+void pit_wait_ms(size_t ticks);
 void pit_sound_test();

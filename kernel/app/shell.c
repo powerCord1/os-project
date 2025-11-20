@@ -5,24 +5,24 @@
 #include <cmos.h>
 #include <cpu.h>
 #include <debug.h>
+#include <framebuffer.h>
 #include <keyboard.h>
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
 #include <shell.h>
 #include <stdio.h>
-#include <tty.h>
 
 const char *shell_prompt = "> ";
 char input_buffer[256];
 bool exit;
 
-#define MAX_HISTORY 16
+#define MAX_HISTORY 1024
 static char command_history[MAX_HISTORY][256];
 static int history_count = 0;
 static int history_index = 0;
 static char current_input_buffer[256];
-static bool is_history_scrolling = false;
+static bool is_recall_active = false;
 
 const cmd_list_t cmds[] = {{"clear", &cmd_clear},
                            {"exit", &cmd_exit},
@@ -34,7 +34,8 @@ const cmd_list_t cmds[] = {{"clear", &cmd_clear},
                            {"date", &cmd_date},
                            {"soundtest", &cmd_sound_test},
                            {"history", &cmd_history},
-                           {"sysinfo", &cmd_sysinfo}};
+                           {"sysinfo", &cmd_sysinfo},
+                           {"fbtest", &cmd_fbtest}};
 
 uint8_t cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
 
@@ -51,7 +52,7 @@ void shell_main()
             key = kbd_get_key(true);
             if (key.scancode == KEY_ENTER) {
                 putchar('\n');
-                is_history_scrolling = false;
+                is_recall_active = false;
                 memset(current_input_buffer, 0, sizeof(current_input_buffer));
                 break;
             } else if (key.scancode == KEY_BACKSPACE) {
@@ -66,9 +67,9 @@ void shell_main()
                     continue;
                 }
 
-                if (!is_history_scrolling) {
+                if (!is_recall_active) {
                     strcpy(current_input_buffer, input_buffer);
-                    is_history_scrolling = true;
+                    is_recall_active = true;
                 }
 
                 if (history_index > 0) {
@@ -83,7 +84,7 @@ void shell_main()
                 }
                 continue;
             } else if (key.scancode == KEY_ARROW_DOWN) {
-                if (!is_history_scrolling) {
+                if (!is_recall_active) {
                     continue;
                 }
 
@@ -96,7 +97,7 @@ void shell_main()
 
                     if (history_index == history_count) {
                         strcpy(input_buffer, current_input_buffer);
-                        is_history_scrolling = false;
+                        is_recall_active = false;
                     } else {
                         strcpy(input_buffer, command_history[history_index]);
                     }
@@ -121,7 +122,7 @@ void shell_main()
                 strcpy(command_history[MAX_HISTORY - 1], input_buffer);
             }
             history_index = history_count;
-            is_history_scrolling = false;
+            is_recall_active = false;
             memset(current_input_buffer, 0, sizeof(current_input_buffer));
             process_cmd(input_buffer);
         }
@@ -164,7 +165,7 @@ void cmd_history(int argc, char **argv)
 
 void cmd_clear(int argc, char **argv)
 {
-    term_clear();
+    fb_clear();
 }
 
 void cmd_exit(int argc, char **argv)
@@ -224,5 +225,23 @@ void cmd_sound_test(int argc, char **argv)
 void cmd_sysinfo(int argc, char **argv)
 {
     printf("System information:\n");
-    printf("PE: %x\n", is_pe_enabled());
+
+    uint64_t cr0, cr2, cr3, cr4, rflags;
+
+    asm volatile("mov %%cr0, %0" : "=r"(cr0));
+    asm volatile("mov %%cr2, %0" : "=r"(cr2));
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    asm volatile("mov %%cr4, %0" : "=r"(cr4));
+    asm volatile("pushfq; popq %0" : "=r"(rflags));
+
+    printf("CR0:    0x%016lx\n", cr0);
+    printf("CR2:    0x%016lx\n", cr2);
+    printf("CR3:    0x%016lx\n", cr3);
+    printf("CR4:    0x%016lx\n", cr4);
+    printf("RFLAGS: 0x%016lx\n", rflags);
+}
+
+void cmd_fbtest(int argc, char **argv)
+{
+    fb_matrix_test();
 }

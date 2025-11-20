@@ -3,12 +3,12 @@
 
 #include <cpu.h>
 #include <debug.h>
+#include <framebuffer.h>
 #include <io.h>
 #include <keyboard.h>
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
-#include <tty.h>
 
 #define KBD_DATA_PORT 0x60
 #define KBD_STATUS_PORT 0x64
@@ -104,10 +104,10 @@ void keyboard_handler()
         case KEY_F3:
             break;
         case KEY_F4:
-            term_clear();
+            fb_clear();
             break;
         case KEY_F5:
-            term_chartest();
+            fb_char_test();
             break;
         case KEY_F6:
             reboot();
@@ -124,6 +124,7 @@ void keyboard_handler()
 
 key_t kbd_get_key(bool wait)
 {
+    fb_show_cursor(); // should always show cursor when waiting for input
     if (wait) {
         last_scancode = 0;
         while (last_scancode == 0) {

@@ -37,6 +37,7 @@ _start:
     push %rax
 
 	call main
+    call main_exit
 	cli
 
 1:	hlt

@@ -96,8 +96,8 @@ void idt_init()
         &isr_unhandled,
 
         // interrupts
-        &isr_pit,      // PIT
-        &isr_keyboard, // Keyboard
+        &isr_pit,
+        &isr_keyboard,
         &isr_unhandled,
         &isr_unhandled,
         &isr_unhandled,

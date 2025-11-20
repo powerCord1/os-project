@@ -2,9 +2,9 @@
 
 #include <app.h>
 #include <debug.h>
+#include <framebuffer.h>
 #include <keyboard.h>
 #include <stdio.h>
-#include <tty.h>
 
 void typewriter_main()
 {
@@ -16,16 +16,17 @@ void typewriter_main()
         case KEY_ESC:
             break;
         case KEY_ARROW_LEFT:
-            term_cursor_back(false);
+            fb_cursor_left();
+            ;
             continue;
         case KEY_ARROW_RIGHT:
-            term_cursor_forward();
+            fb_cursor_right();
             continue;
         case KEY_ARROW_UP:
-            term_cursor_up();
+            fb_cursor_up();
             continue;
         case KEY_ARROW_DOWN:
-            term_cursor_down();
+            fb_cursor_down();
             continue;
         default:
             char c = key.key;

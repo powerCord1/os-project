@@ -17,3 +17,8 @@ size_t floordiv2(size_t n)
     }
     return n / 2;
 }
+
+int abs(int n)
+{
+    return (n < 0) ? -n : n;
+}

@@ -40,7 +40,7 @@ void pit_handler()
     }
 }
 
-static void pit_wait_ms(size_t ticks)
+void pit_wait_ms(size_t ticks)
 {
     size_t eticks = pit_ticks + ticks;
     while (pit_ticks < eticks) {
