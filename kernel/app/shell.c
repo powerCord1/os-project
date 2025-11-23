@@ -106,7 +106,14 @@ void shell_main()
                     printf("%s", input_buffer);
                 }
                 continue;
+            } else if (kbd_modifiers.ctrl && key.scancode == KEY_C) {
+                printf("^C\n");
+                i = 0;
+                memset(input_buffer, 0, sizeof(input_buffer));
+                key.scancode = KEY_ENTER; // break out of the inner loop
+                continue;
             }
+
             if (i < (sizeof(input_buffer) - 1) && key.key != 0 &&
                 key.key != '\n') {
                 input_buffer[i++] = key.key;
@@ -213,8 +220,8 @@ void cmd_date(int argc, char **argv)
     datetime_t datetime;
     cmos_get_datetime(&datetime);
 
-    printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month, datetime.year,
-           datetime.hour, datetime.minute, datetime.second);
+    printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month,
+           datetime.year, datetime.hour, datetime.minute, datetime.second);
 }
 
 void cmd_shutdown(int argc, char **argv)
