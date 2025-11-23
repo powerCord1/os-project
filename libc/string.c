@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <heap.h>
 #include <string.h>
 
 void *memmove(void *dest, const void *src, size_t n)
@@ -185,4 +186,14 @@ char *uitoa(char *dest, unsigned int n)
 {
     *uitoa_helper(dest, n) = '\0';
     return dest;
+}
+
+char *strdup(const char *s)
+{
+    size_t len = strlen(s) + 1;
+    char *new_s = malloc(len);
+    if (new_s == NULL) {
+        return NULL;
+    }
+    return strcpy(new_s, s);
 }

@@ -9,7 +9,7 @@ void heap_test_main()
 {
     printf("Running heap test...\n");
 
-    char *test_str = (char *)malloc(20);
+    char *test_str = (char *)malloc(1000000);
     if (test_str) {
         strcpy(test_str, "Heap test successful!");
         printf("%s\n", test_str);

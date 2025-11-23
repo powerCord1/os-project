@@ -6,7 +6,6 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
-#include <graphics.h>
 #include <init.h>
 #include <interrupts.h>
 #include <keyboard.h>
@@ -57,7 +56,8 @@ void main_menu()
                      {"Heap test", &heap_test_main},
                      {"Shell", &shell_main},
                      {"Stack Smash Test", &ssp_test_main},
-                     {"Element drawing test", &element_test}};
+                     {"Element drawing test", &element_test},
+                     {"PIT test", &pit_test_main}};
     create_menu("Main menu", "Choose an app to launch", apps,
                 sizeof(apps) / sizeof(menu_t));
 }

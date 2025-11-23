@@ -124,12 +124,13 @@ void keyboard_handler()
 
 key_t kbd_get_key(bool wait)
 {
-    fb_show_cursor(); // should always show cursor when waiting for input
     if (wait) {
+        fb_show_cursor(); // should always show cursor when waiting for input
         last_scancode = 0;
         while (last_scancode == 0) {
             idle();
         }
+        fb_hide_cursor();
     }
     last_key.key = scancode_map[last_scancode];
     last_key.scancode = last_scancode;

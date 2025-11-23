@@ -287,7 +287,8 @@ void fb_newline()
 
 void fb_scroll()
 {
-    if (cursor.visible) {
+    bool was_cursor_visible = cursor.visible;
+    if (was_cursor_visible) {
         fb_erase_cursor(); // don't copy the cursor
     }
     memmove(fb_ptr, fb_ptr + char_height * (fb->pitch / 4),
@@ -298,7 +299,7 @@ void fb_scroll()
             fb_put_pixel(x, y, bg);
         }
     }
-    if (cursor.visible) {
+    if (was_cursor_visible) {
         fb_draw_cursor();
     }
 }
@@ -393,7 +394,6 @@ void fb_draw_title(const char *title)
 
     uint8_t height = 3;
 
-    // set bg early so cursor doesn't leave black lines
     fb_set_color(0, 0xffffff);
 
     // draw white block

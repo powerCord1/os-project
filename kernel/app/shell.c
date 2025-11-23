@@ -6,6 +6,7 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
+#include <heap.h>
 #include <keyboard.h>
 #include <panic.h>
 #include <pit.h>
@@ -14,14 +15,14 @@
 #include <stdio.h>
 
 const char *shell_prompt = "> ";
-char input_buffer[256];
+char input_buffer[512];
 bool exit;
 
 #define MAX_HISTORY 1024
-static char command_history[MAX_HISTORY][256];
+static char *command_history[MAX_HISTORY];
 static int history_count = 0;
 static int history_index = 0;
-static char current_input_buffer[256];
+static char current_input_buffer[512];
 static bool is_recall_active = false;
 
 const cmd_list_t cmds[] = {{"clear", &cmd_clear},
@@ -114,11 +115,17 @@ void shell_main()
         }
         if (i > 0) {
             if (history_count < MAX_HISTORY) {
-                strcpy(command_history[history_count++], input_buffer);
+                command_history[history_count] =
+                    malloc(strlen(input_buffer) + 1);
+                strcpy(command_history[history_count], input_buffer);
+                history_count++;
             } else {
+                free(command_history[0]);
                 for (int j = 0; j < MAX_HISTORY - 1; j++) {
-                    strcpy(command_history[j], command_history[j + 1]);
+                    command_history[j] = command_history[j + 1];
                 }
+                command_history[MAX_HISTORY - 1] =
+                    malloc(strlen(input_buffer) + 1);
                 strcpy(command_history[MAX_HISTORY - 1], input_buffer);
             }
             history_index = history_count;
@@ -128,6 +135,10 @@ void shell_main()
         }
         key.key = 0;
         key.scancode = 0;
+    }
+
+    for (int i = 0; i < history_count; i++) {
+        free(command_history[i]);
     }
 }
 
@@ -200,9 +211,9 @@ void cmd_help(int argc, char **argv)
 void cmd_date(int argc, char **argv)
 {
     datetime_t datetime;
-    cmos_get_data(&datetime);
+    cmos_get_datetime(&datetime);
 
-    printf("%d/%d/%d %d:%d:%d\n", datetime.day, datetime.month, datetime.year,
+    printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month, datetime.year,
            datetime.hour, datetime.minute, datetime.second);
 }
 

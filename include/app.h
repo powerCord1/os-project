@@ -4,3 +4,4 @@ void key_notes_main();
 void shell_main();
 void ssp_test_main();
 void element_test();
+void pit_test_main();

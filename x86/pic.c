@@ -67,8 +67,13 @@ void pic_init()
     outb(PIC2_DATA, ICW4_8086);
     io_wait();
 
-    outb(PIC1_DATA, 0xff);
-    outb(PIC2_DATA, 0xff);
+    // mask all interrupts
+    outb(PIC1_DATA, 0xFF);
+    outb(PIC2_DATA, 0xFF);
+
+    // enable PICs
+    outb(PIC1_DATA, 0x00);
+    outb(PIC2_DATA, 0x00);
 }
 
 void pic_disable()
