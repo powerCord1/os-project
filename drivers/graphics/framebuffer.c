@@ -14,6 +14,7 @@
 #include <string.h>
 
 #define BELL_FREQ 4750
+#define INDENT_WIDTH 4
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
@@ -338,6 +339,14 @@ void fb_putchar(char c)
         return;
     } else if (c == '\b') {
         fb_backspace();
+        return;
+    } else if (c == '\r') {
+        fb_cursor_home();
+        return;
+    } else if (c == '\t') {
+        for (int i = 0; i < INDENT_WIDTH; i++) {
+            fb_putchar(' ');
+        }
         return;
     } else if (c == 127) { // ASCII DEL
         // fb_delete();
