@@ -13,9 +13,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define BELL_FREQ 4750
-#define INDENT_WIDTH 4
-
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
 

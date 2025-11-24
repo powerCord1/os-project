@@ -63,6 +63,16 @@ void shell_main()
                     putchar('\b');
                 }
                 continue;
+            } else if (key.key == '\t') {
+                for (int j = 0; j < INDENT_WIDTH; j++) {
+                    if (i < (sizeof(input_buffer) - 1)) {
+                        input_buffer[i++] = ' ';
+                        putchar(' ');
+                    } else {
+                        break;
+                    }
+                }
+                continue;
             } else if (key.scancode == KEY_ARROW_UP) {
                 if (history_count == 0) {
                     continue;
