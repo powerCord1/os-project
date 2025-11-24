@@ -166,6 +166,49 @@ void fb_draw_line(uint32_t start_x, uint32_t start_y, uint32_t end_x,
     fb_put_pixel(end_x, end_y, fg);
 }
 
+void fb_draw_circle(uint32_t center_x, uint32_t center_y, int radius,
+                    uint32_t color, bool filled)
+{
+    if (filled) {
+        for (int y = -radius; y <= radius; y++) {
+            for (int x = -radius; x <= radius; x++) {
+                if (x * x + y * y <= radius * radius) {
+                    uint32_t draw_x = center_x + x;
+                    uint32_t draw_y = center_y + y;
+                    if (draw_x < fb->width && draw_y < fb->height) {
+                        fb_put_pixel(draw_x, draw_y, color);
+                    }
+                }
+            }
+        }
+    } else {
+        int x = radius;
+        int y = 0;
+        int err = 0;
+
+        while (x >= y) {
+            fb_put_pixel(center_x + x, center_y + y, color);
+            fb_put_pixel(center_x + y, center_y + x, color);
+            fb_put_pixel(center_x - y, center_y + x, color);
+            fb_put_pixel(center_x - x, center_y + y, color);
+            fb_put_pixel(center_x - x, center_y - y, color);
+            fb_put_pixel(center_x - y, center_y - x, color);
+            fb_put_pixel(center_x + y, center_y - x, color);
+            fb_put_pixel(center_x + x, center_y - y, color);
+
+            if (err <= 0) {
+                y += 1;
+                err += 2 * y + 1;
+            }
+
+            if (err > 0) {
+                x -= 1;
+                err -= 2 * x + 1;
+            }
+        }
+    }
+}
+
 void fb_clear()
 {
     fb_fill_screen(0);

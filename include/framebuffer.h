@@ -31,6 +31,8 @@ void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                   uint32_t color);
 void fb_draw_line(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                   uint32_t end_y);
+void fb_draw_circle(uint32_t center_x, uint32_t center_y, int radius,
+                    uint32_t color, bool filled);
 void fb_putchar(char c);
 void fb_putchar_at(char c, uint32_t x_pos, uint32_t y_pos);
 void fb_print_string(const char *str);
