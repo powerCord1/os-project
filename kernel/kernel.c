@@ -53,7 +53,7 @@ void main_menu()
 {
     menu_t apps[] = {{"Typewriter", &typewriter_main},
                      {"Key notes", &key_notes_main},
-                     {"Heap test", &heap_test_main},
+                     {"Random test", &random_test_main},
                      {"Shell", &shell_main},
                      {"Stack Smash Test", &ssp_test_main},
                      {"Element drawing test", &element_test},

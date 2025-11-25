@@ -1,6 +1,8 @@
-#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
+
+#include <math.h>
+#include <pit.h>
 
 size_t round_to_even(size_t n, bool roundUp)
 {
@@ -59,4 +61,28 @@ double sin(double x)
 double cos(double x)
 {
     return sin(PI / 2.0 - x);
+}
+
+static unsigned long int next = 1;
+
+void srand(unsigned int seed)
+{
+    next = seed;
+}
+
+size_t rand(void)
+{
+    next = next * 1103515245 + 12345;
+    return (unsigned int)((next / 65536) % 2147483647);
+}
+
+size_t random_range(size_t min, size_t max)
+{
+    if (next == 1) {
+        srand(pit_ticks);
+    }
+    if (min > max) {
+        return 0; // Or handle error appropriately
+    }
+    return min + rand() % (max - min + 1);
 }

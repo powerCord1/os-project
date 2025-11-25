@@ -8,3 +8,6 @@ size_t floordiv2(size_t n);
 int abs(int n);
 double sin(double x);
 double cos(double x);
+void srand(unsigned int seed);
+size_t rand(void);
+size_t random_range(size_t min, size_t max);

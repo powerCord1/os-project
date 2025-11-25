@@ -15,6 +15,7 @@
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
+static size_t pitch_in_pixels;
 
 uint32_t fg;
 uint32_t bg;
@@ -37,6 +38,7 @@ void fb_init()
 
     fb = framebuffer_request.response->framebuffers[0];
     fb_ptr = fb->address;
+    pitch_in_pixels = fb->pitch / 4;
 
     fg = 0xFFFFFF;
     bg = 0x000000;
@@ -119,12 +121,12 @@ void bell()
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
-    fb_ptr[y * (fb->pitch / 4) + x] = color;
+    fb_ptr[y * pitch_in_pixels + x] = color;
 }
 
 uint32_t fb_get_pixel(uint32_t x, uint32_t y)
 {
-    return fb_ptr[y * (fb->pitch / 4) + x];
+    return fb_ptr[y * pitch_in_pixels + x];
 }
 
 void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
@@ -224,21 +226,31 @@ void fb_clear_region(uint32_t start_x, uint32_t start_y, uint32_t end_x,
 
 void fb_backspace()
 {
-    uint32_t new_x = cursor.x;
-    uint32_t new_y = cursor.y;
+    fb_erase_cursor();
+
     if (cursor.x == 0) {
         if (cursor.y == 0) {
             bell();
+            fb_draw_cursor();
             return;
         }
-        new_y -= char_height;
-        new_x = fb->width - char_width;
-    } else {
-        new_x -= char_width;
+        // TODO: handle backspace at the beginning of a line to wrap to the
+        // previous line.
+        bell();
+        fb_draw_cursor();
+        return;
     }
-    fb_set_cursor(new_x, new_y);
-    fb_erase_cursor();
-    fb_putchar_at(' ', cursor.x, cursor.y);
+
+    cursor.x -= char_width;
+
+    for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+        memmove(&fb_ptr[y * pitch_in_pixels + cursor.x],
+                &fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+                (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+    }
+
+    fb_draw_rect(fb->width - char_width, cursor.y, char_width, char_height, bg);
+
     if (cursor.visible) {
         fb_draw_cursor();
     }
@@ -246,7 +258,8 @@ void fb_backspace()
 
 void fb_delete()
 {
-    // TODO: implement delete function
+    fb_cursor_right();
+    fb_backspace();
 }
 
 void fb_cursor_left()
@@ -332,7 +345,7 @@ void fb_scroll()
     if (was_cursor_visible) {
         fb_erase_cursor(); // don't copy the cursor
     }
-    memmove(fb_ptr, fb_ptr + char_height * (fb->pitch / 4),
+    memmove(fb_ptr, fb_ptr + char_height * pitch_in_pixels,
             (fb->height - char_height) * fb->pitch);
 
     for (uint32_t y = fb->height - char_height; y < fb->height; y++) {
@@ -389,11 +402,19 @@ void fb_putchar(char c)
         }
         return;
     } else if (c == 127) { // ASCII DEL
-        // fb_delete();
+        fb_delete();
         return;
     }
 
     fb_erase_cursor();
+
+    // shift characters to the right to make space for the new one
+    for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+        memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+                &fb_ptr[y * pitch_in_pixels + cursor.x],
+                (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+    }
+
     fb_putchar_at(c, cursor.x, cursor.y);
     cursor.x += char_width;
     if (cursor.x >= fb->width) {
