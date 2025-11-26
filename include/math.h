@@ -6,6 +6,8 @@
 size_t round_to_even(size_t n, bool roundUp);
 size_t floordiv2(size_t n);
 int abs(int n);
+double fabs(double x);
+double fmod(double x, double y);
 double sin(double x);
 double cos(double x);
 void srand(unsigned int seed);

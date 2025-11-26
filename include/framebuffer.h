@@ -38,6 +38,7 @@ void fb_putchar_at(char c, uint32_t x_pos, uint32_t y_pos);
 void fb_print_string(const char *str);
 void fb_matrix_test();
 void fb_char_test();
+void fb_rgb_test();
 void fb_draw_title(const char *title);
 void fb_newline();
 void fb_backspace();

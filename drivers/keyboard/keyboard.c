@@ -27,7 +27,10 @@ key_t last_key = {0, 0};
 
 void kbd_init()
 {
+    log_verbose("Setting keyboard LED state");
     kbd_set_leds();
+    log_verbose("Setting typematic rate, rate: %d, delay: %d",
+                KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
     kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
 }
 

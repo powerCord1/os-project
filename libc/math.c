@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include <debug.h>
 #include <math.h>
 #include <pit.h>
 
@@ -23,6 +24,20 @@ size_t floordiv2(size_t n)
 int abs(int n)
 {
     return (n < 0) ? -n : n;
+}
+
+double fabs(double x)
+{
+    return (x < 0.0) ? -x : x;
+}
+
+double fmod(double x, double y)
+{
+    if (y == 0.0) {
+        log_err("fmod: division by zero");
+        return 0.0;
+    }
+    return x - (long)(x / y) * y;
 }
 
 // used by sin() for range reduction
@@ -82,7 +97,8 @@ size_t random_range(size_t min, size_t max)
         srand(pit_ticks);
     }
     if (min > max) {
-        return 0; // Or handle error appropriately
+        log_err("random_range: min cannot be greater than max");
+        return 0;
     }
     return min + rand() % (max - min + 1);
 }

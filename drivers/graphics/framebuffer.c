@@ -385,6 +385,55 @@ void fb_char_test()
     }
 }
 
+void fb_rgb_test()
+{
+    for (uint32_t y = 0; y < fb->height; y++) {
+        for (uint32_t x = 0; x < fb->width; x++) {
+            double h = (double)x / fb->width * 360.0;
+            double s = 1.0;
+            double v = 1.0;
+
+            // convert to RGB
+            double c = v * s;
+            double x_prime = c * (1 - fabs(fmod(h / 60.0, 2) - 1));
+            double m = v - c;
+            double r_prime, g_prime, b_prime;
+
+            if (0 <= h && h < 60) {
+                r_prime = c;
+                g_prime = x_prime;
+                b_prime = 0;
+            } else if (60 <= h && h < 120) {
+                r_prime = x_prime;
+                g_prime = c;
+                b_prime = 0;
+            } else if (120 <= h && h < 180) {
+                r_prime = 0;
+                g_prime = c;
+                b_prime = x_prime;
+            } else if (180 <= h && h < 240) {
+                r_prime = 0;
+                g_prime = x_prime;
+                b_prime = c;
+            } else if (240 <= h && h < 300) {
+                r_prime = x_prime;
+                g_prime = 0;
+                b_prime = c;
+            } else { // 300 <= h && h < 360
+                r_prime = c;
+                g_prime = 0;
+                b_prime = x_prime;
+            }
+
+            uint8_t r = (uint8_t)((r_prime + m) * 255);
+            uint8_t g = (uint8_t)((g_prime + m) * 255);
+            uint8_t b = (uint8_t)((b_prime + m) * 255);
+
+            fb_put_pixel(x, y, (r << 16) | (g << 8) | b);
+        }
+    }
+}
+
 void fb_putchar(char c)
 {
     if (c == '\n') {
@@ -409,11 +458,11 @@ void fb_putchar(char c)
     fb_erase_cursor();
 
     // shift characters to the right to make space for the new one
-    for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
-        memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
-                &fb_ptr[y * pitch_in_pixels + cursor.x],
-                (fb->width - cursor.x - char_width) * sizeof(uint32_t));
-    }
+    // for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+    //     memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+    //             &fb_ptr[y * pitch_in_pixels + cursor.x],
+    //             (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+    // }
 
     fb_putchar_at(c, cursor.x, cursor.y);
     cursor.x += char_width;

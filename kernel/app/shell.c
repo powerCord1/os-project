@@ -24,6 +24,7 @@ static int history_count = 0;
 static int history_index = 0;
 static char current_input_buffer[512];
 static bool is_recall_active = false;
+static bool daylight_savings_enabled = false;
 
 const cmd_list_t cmds[] = {{"clear", &cmd_clear},
                            {"exit", &cmd_exit},
@@ -36,7 +37,8 @@ const cmd_list_t cmds[] = {{"clear", &cmd_clear},
                            {"soundtest", &cmd_sound_test},
                            {"history", &cmd_history},
                            {"sysinfo", &cmd_sysinfo},
-                           {"fbtest", &cmd_fbtest}};
+                           {"fbtest", &cmd_fbtest},
+                           {"rgbtest", &cmd_rgbtest}};
 
 uint8_t cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
 
@@ -227,8 +229,21 @@ void cmd_help(int argc, char **argv)
 
 void cmd_date(int argc, char **argv)
 {
+    if (argc > 1 && strcmp(argv[1], "--toggle-daylight-savings") == 0) {
+        daylight_savings_enabled = !daylight_savings_enabled;
+        printf("Daylight savings %s\n",
+               daylight_savings_enabled ? "enabled" : "disabled");
+        return;
+    }
+
     datetime_t datetime;
     cmos_get_datetime(&datetime);
+
+    if (daylight_savings_enabled) {
+        datetime.hour = (datetime.hour + 1) % 24;
+        // Note: This is a simplified implementation. A full implementation
+        // would also handle date changes when the time crosses midnight.
+    }
 
     printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month,
            datetime.year, datetime.hour, datetime.minute, datetime.second);
@@ -267,9 +282,16 @@ void cmd_sysinfo(int argc, char **argv)
     printf("CR3:    0x%016lx\n", cr3);
     printf("CR4:    0x%016lx\n", cr4);
     printf("RFLAGS: 0x%016lx\n", rflags);
+
+    printf("APIC:   %s\n", is_apic_enabled() ? "enabled" : "disabled");
 }
 
 void cmd_fbtest(int argc, char **argv)
 {
     fb_matrix_test();
+}
+
+void cmd_rgbtest(int argc, char **argv)
+{
+    fb_rgb_test();
 }
