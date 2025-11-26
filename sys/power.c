@@ -64,8 +64,8 @@ __attribute__((noreturn)) void shutdown()
 void sys_poweroff()
 {
     outw(SHUTDOWN_PORT_BOCHS, SHUTDOWN_SIG_BOCHS); // bochs
-    // outw(SHUTDOWN_PORT_QEMU, SHUTDOWN_SIG_QEMU);   // qemu
-    outw(SHUTDOWN_PORT_VBOX, SHUTDOWN_SIG_VBOX); // vbox
+    outw(SHUTDOWN_PORT_QEMU, SHUTDOWN_SIG_QEMU);   // qemu
+    outw(SHUTDOWN_PORT_VBOX, SHUTDOWN_SIG_VBOX);   // vbox
     outw(SHUTDOWN_PORT_CLOUD_HYPERVISOR,
          SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
 }

@@ -30,5 +30,4 @@ void sin_test_main()
 
     while (kbd_get_key(true).scancode != KEY_ESC) {
     }
-    fb_clear();
 }

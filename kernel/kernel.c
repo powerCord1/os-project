@@ -59,7 +59,7 @@ void main_menu()
                      {"Element drawing test", &element_test},
                      {"PIT test", &pit_test_main},
                      {"Memory test", &memory_test_main},
-                     {"Sin Wave Test", &sin_test_main}};
+                     {"Sine Wave Test", &sin_test_main}};
     create_menu("Main menu", "Choose an app to launch", apps,
                 sizeof(apps) / sizeof(menu_t));
 }
