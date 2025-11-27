@@ -11,7 +11,7 @@ void sin_test_main()
     fb_clear();
     fb_draw_title("Sine Wave Test");
 
-    double scale_x = fb->width / (2 * PI);
+    double scale_x = fb->width / (2 * M_PI);
     double scale_y = fb->height / 2.0;
     double offset_y = fb->height / 2.0;
 

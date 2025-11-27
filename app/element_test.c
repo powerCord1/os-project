@@ -15,9 +15,11 @@ void element_test()
     // rect
     fb_draw_rect(fb->width / 2 - 150, 100, 300, 50, 0xff0000);
 
-    // circle
-    fb_draw_circle(fb->width / 2, fb->height / 3 * 2 + 100, 100, 0x00ff00,
+    // circles
+    fb_draw_circle(fb->width / 2 - 150, fb->height / 3 * 2 + 100, 100, 0x00ff00,
                    true);
+    fb_draw_circle(fb->width / 2 + 150, fb->height / 3 * 2 + 100, 100, 0x00ff00,
+                   false);
 
     // line
 #define clear true

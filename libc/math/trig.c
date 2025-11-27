@@ -3,7 +3,7 @@
 // used by sin() for range reduction
 static double reduce_angle(double angle)
 {
-    double twopi = 2.0 * PI;
+    double twopi = 2.0 * M_PI;
     while (angle >= twopi) {
         angle -= twopi;
     }
@@ -35,5 +35,5 @@ double sin(double x)
 // cos implementation using sin()
 double cos(double x)
 {
-    return sin(PI / 2.0 - x);
+    return sin(M_PI / 2.0 - x);
 }
