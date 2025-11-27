@@ -25,6 +25,8 @@ const uint32_t default_bg = 0x000000;
 
 cursor_t cursor;
 
+static bool overwrite_mode = false;
+
 void fb_init()
 {
     log_verbose("Checking for framebuffers");
@@ -231,6 +233,19 @@ void fb_clear_region(uint32_t start_x, uint32_t start_y, uint32_t end_x,
     fb_draw_rect(start_x, start_y, end_x - start_x, end_y - start_y, bg);
 }
 
+bool fb_is_region_empty(uint32_t start_x, uint32_t start_y, uint32_t end_x,
+                        uint32_t end_y)
+{
+    for (uint32_t y = start_y; y < end_y; y++) {
+        for (uint32_t x = start_x; x < end_x; x++) {
+            if (fb_get_pixel(x, y) != bg) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 void fb_backspace()
 {
     fb_erase_cursor();
@@ -250,16 +265,22 @@ void fb_backspace()
 
     cursor.x -= char_width;
 
-    for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
-        memmove(&fb_ptr[y * pitch_in_pixels + cursor.x],
-                &fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
-                (fb->width - cursor.x - char_width) * sizeof(uint32_t));
-    }
+    if (!fb_is_region_empty(cursor.x + char_width, cursor.y, fb->width,
+                            cursor.y + char_height)) {
+        log_debug("shifting characters left");
+        for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+            memmove(&fb_ptr[y * pitch_in_pixels + cursor.x],
+                    &fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+                    (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+        }
 
-    fb_draw_rect(fb->width - char_width, cursor.y, char_width, char_height, bg);
+        fb_draw_rect(fb->width - char_width, cursor.y, char_width, char_height,
+                     bg);
 
-    if (cursor.visible) {
         fb_draw_cursor();
+    } else {
+        fb_clear_region(cursor.x, cursor.y, cursor.x + char_width,
+                        cursor.y + char_height);
     }
 }
 
@@ -444,12 +465,15 @@ void fb_rgb_test()
 void fb_putchar(char c)
 {
     if (c == '\n') {
+        overwrite_mode = false;
         fb_newline();
         return;
     } else if (c == '\b') {
+        overwrite_mode = false;
         fb_backspace();
         return;
     } else if (c == '\r') {
+        overwrite_mode = true;
         fb_cursor_home();
         return;
     } else if (c == '\t') {
@@ -464,12 +488,21 @@ void fb_putchar(char c)
 
     fb_erase_cursor();
 
-    // shift characters to the right to make space for the new one
-    // for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
-    //     memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
-    //             &fb_ptr[y * pitch_in_pixels + cursor.x],
-    //             (fb->width - cursor.x - char_width) * sizeof(uint32_t));
-    // }
+    if (!overwrite_mode &&
+        !fb_is_region_empty(
+            cursor.x, cursor.y, cursor.x + char_width, // is there a character
+            cursor.y + char_height)) { // in front of the cursor? this is ugly,
+                                       // make a text buffer at some point
+        log_debug("shifting characters right");
+        for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+            memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+                    &fb_ptr[y * pitch_in_pixels + cursor.x],
+                    (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+        }
+    } else {
+        // A printable character is being written, disable overwrite mode.
+        overwrite_mode = false;
+    }
 
     fb_putchar_at(c, cursor.x, cursor.y);
     cursor.x += char_width;

@@ -66,6 +66,9 @@ void shell_main()
                     putchar('\b');
                 }
                 continue;
+            } else if (key.scancode == KEY_DELETE) {
+                fb_delete();
+                continue;
             } else if (key.key == '\t') {
                 for (int j = 0; j < INDENT_WIDTH; j++) {
                     if (i < (sizeof(input_buffer) - 1)) {
