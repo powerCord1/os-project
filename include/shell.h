@@ -23,3 +23,4 @@ void cmd_history(int argc, char **argv);
 void cmd_sysinfo(int argc, char **argv);
 void cmd_fbtest(int argc, char **argv);
 void cmd_rgbtest(int argc, char **argv);
+void cmd_memtest(int argc, char **argv);

@@ -26,6 +26,7 @@ void pit_init(uint32_t frequency)
 
     uint16_t divisor = PIT_BASE_FREQUENCY / frequency;
 
+    //
     outb(PIT_CMD_PORT, 0x36);
 
     outb(PIT_CHANNEL0_DATA_PORT, (uint8_t)(divisor & 0xFF));
@@ -52,6 +53,8 @@ void pit_wait_ms(size_t ticks)
 
 void pit_play_sound(uint32_t freq)
 {
+    log_verbose("Playing sound at %d Hz", freq);
+
     if (freq == 0) {
         pit_nosound();
         return;

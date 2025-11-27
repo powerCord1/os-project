@@ -13,7 +13,6 @@ void key_notes_main()
             break;
         }
         uint32_t freq = 250 + (scancode * 100);
-        log_debug("Frequency: %d", freq);
         pit_request_beep(freq);
     }
 }
