@@ -19,6 +19,8 @@ void bell();
 void fb_clear();
 void fb_clear_region(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                      uint32_t end_y);
+void fb_clear_line(uint32_t line_num);
+void fb_clear_vp();
 bool fb_is_region_empty(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                         uint32_t end_y);
 void fb_set_color(uint32_t _fg, uint32_t _bg);

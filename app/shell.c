@@ -199,7 +199,7 @@ void cmd_history(int argc, char **argv)
 
 void cmd_clear(int argc, char **argv)
 {
-    fb_clear();
+    fb_clear_vp();
 }
 
 void cmd_exit(int argc, char **argv)

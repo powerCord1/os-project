@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define TITLE_HEIGHT 3
+
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
 static size_t pitch_in_pixels;
@@ -231,6 +233,19 @@ void fb_clear_region(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                      uint32_t end_y)
 {
     fb_draw_rect(start_x, start_y, end_x - start_x, end_y - start_y, bg);
+}
+
+void fb_clear_line(uint32_t line_num)
+{
+    fb_draw_rect(0, line_num * char_height, fb->width, char_height, bg);
+}
+
+void fb_clear_vp()
+{
+    const uint32_t title_height_pixels = char_height * TITLE_HEIGHT;
+    fb_clear_region(0, title_height_pixels, fb->width,
+                    fb->height - title_height_pixels);
+    fb_set_cursor(0, title_height_pixels + char_height);
 }
 
 bool fb_is_region_empty(uint32_t start_x, uint32_t start_y, uint32_t end_x,
@@ -551,19 +566,17 @@ void fb_draw_title(const char *title)
 {
     fb_hide_cursor();
 
-    uint8_t height = 3;
-
     fb_set_color(0, 0xffffff);
 
     // draw white block
-    fb_draw_rect(0, 0, fb->width, char_height * height, 0xffffff);
+    fb_draw_rect(0, 0, fb->width, char_height * TITLE_HEIGHT, 0xffffff);
 
     // draw text in middle of block
-    fb_set_cursor(0, floordiv2(height) * char_height);
+    fb_set_cursor(0, floordiv2(TITLE_HEIGHT) * char_height);
     fb_print_centered(title);
 
     // set cursor after title
-    fb_set_cursor(0, char_height * (height + 1));
+    fb_set_cursor(0, char_height * (TITLE_HEIGHT + 1));
 
     // restore settings
     fb_reset_color();
