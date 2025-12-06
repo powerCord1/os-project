@@ -16,11 +16,23 @@
 
 #define KBD_LED_CMD 0xED
 
+#define KBD_DEFAULT_TYPM_RATE 0
+#define KBD_DEFAULT_TYPM_DELAY 0
+
 static volatile char last_char = 0;
 static volatile char last_scancode = 0;
 
 kbd_modifiers_t kbd_modifiers = {false, false, false, false, false, false};
 key_t last_key = {0, 0};
+
+void kbd_init()
+{
+    log_verbose("Setting keyboard LED state");
+    kbd_set_leds();
+    log_verbose("Setting typematic rate, rate: %d, delay: %d",
+                KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
+    kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
+}
 
 uint8_t get_key()
 {
@@ -42,6 +54,23 @@ void kbd_set_leds()
 
     wait_for_kbd();
     outb(KBD_DATA_PORT, KBD_LED_CMD);
+    wait_for_kbd();
+    outb(KBD_DATA_PORT, data);
+}
+
+void kbd_set_typematic_rate(uint8_t rate, uint8_t delay)
+{
+    if (rate > 0x1F) {
+        rate = 0x1F;
+    }
+    if (delay > 0x03) {
+        delay = 0x03;
+    }
+
+    uint8_t data = (delay << 5) | rate;
+
+    wait_for_kbd();
+    outb(KBD_DATA_PORT, 0xF3); // Set typematic rate command
     wait_for_kbd();
     outb(KBD_DATA_PORT, data);
 }
@@ -124,12 +153,13 @@ void keyboard_handler()
 
 key_t kbd_get_key(bool wait)
 {
-    fb_show_cursor(); // should always show cursor when waiting for input
     if (wait) {
+        fb_show_cursor(); // should always show cursor when waiting for input
         last_scancode = 0;
         while (last_scancode == 0) {
             idle();
         }
+        fb_hide_cursor();
     }
     last_key.key = scancode_map[last_scancode];
     last_key.scancode = last_scancode;

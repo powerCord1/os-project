@@ -13,10 +13,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#define BELL_FREQ 4750
+#define TITLE_HEIGHT 3
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
+static size_t pitch_in_pixels;
 
 uint32_t fg;
 uint32_t bg;
@@ -25,6 +26,8 @@ const uint32_t default_fg = 0xFFFFFF;
 const uint32_t default_bg = 0x000000;
 
 cursor_t cursor;
+
+static bool overwrite_mode = false;
 
 void fb_init()
 {
@@ -39,6 +42,7 @@ void fb_init()
 
     fb = framebuffer_request.response->framebuffers[0];
     fb_ptr = fb->address;
+    pitch_in_pixels = fb->pitch / 4;
 
     fg = 0xFFFFFF;
     bg = 0x000000;
@@ -121,12 +125,12 @@ void bell()
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
-    fb_ptr[y * (fb->pitch / 4) + x] = color;
+    fb_ptr[y * pitch_in_pixels + x] = color;
 }
 
 uint32_t fb_get_pixel(uint32_t x, uint32_t y)
 {
-    return fb_ptr[y * (fb->pitch / 4) + x];
+    return fb_ptr[y * pitch_in_pixels + x];
 }
 
 void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
@@ -168,6 +172,56 @@ void fb_draw_line(uint32_t start_x, uint32_t start_y, uint32_t end_x,
     fb_put_pixel(end_x, end_y, fg);
 }
 
+void fb_draw_arc(uint32_t center_x, uint32_t center_y, int radius,
+                 int start_angle, int end_angle, uint32_t color)
+{
+    int x = radius, y = 0;
+    int err = 1 - radius;
+
+    while (x >= y) {
+        if (start_angle == 0 && end_angle == 360) {
+            fb_put_pixel(center_x + x, center_y + y, color);
+            fb_put_pixel(center_x + y, center_y + x, color);
+            fb_put_pixel(center_x - y, center_y + x, color);
+            fb_put_pixel(center_x - x, center_y + y, color);
+            fb_put_pixel(center_x - x, center_y - y, color);
+            fb_put_pixel(center_x - y, center_y - x, color);
+            fb_put_pixel(center_x + y, center_y - x, color);
+            fb_put_pixel(center_x + x, center_y - y, color);
+        }
+        // TODO: for partial arcs, calculate the angle of the current (x, y)
+        // and check if it's in the desired range before plotting.
+
+        y++;
+        if (err <= 0) {
+            err += 2 * y + 1;
+        } else {
+            x--;
+            err += 2 * (y - x) + 1;
+        }
+    }
+}
+
+void fb_draw_circle(uint32_t center_x, uint32_t center_y, int radius,
+                    uint32_t color, bool filled)
+{
+    if (filled) {
+        for (int y = -radius; y <= radius; y++) {
+            for (int x = -radius; x <= radius; x++) {
+                if (x * x + y * y <= radius * radius) {
+                    uint32_t draw_x = center_x + x;
+                    uint32_t draw_y = center_y + y;
+                    if (draw_x < fb->width && draw_y < fb->height) {
+                        fb_put_pixel(draw_x, draw_y, color);
+                    }
+                }
+            }
+        }
+    } else {
+        fb_draw_arc(center_x, center_y, radius, 0, 360, color);
+    }
+}
+
 void fb_clear()
 {
     fb_fill_screen(0);
@@ -181,31 +235,74 @@ void fb_clear_region(uint32_t start_x, uint32_t start_y, uint32_t end_x,
     fb_draw_rect(start_x, start_y, end_x - start_x, end_y - start_y, bg);
 }
 
+void fb_clear_line(uint32_t line_num)
+{
+    fb_draw_rect(0, line_num * char_height, fb->width, char_height, bg);
+}
+
+void fb_clear_vp()
+{
+    const uint32_t title_height_pixels = char_height * TITLE_HEIGHT;
+    fb_clear_region(0, title_height_pixels, fb->width,
+                    fb->height - title_height_pixels);
+    fb_set_cursor(0, title_height_pixels + char_height);
+}
+
+bool fb_is_region_empty(uint32_t start_x, uint32_t start_y, uint32_t end_x,
+                        uint32_t end_y)
+{
+    for (uint32_t y = start_y; y < end_y; y++) {
+        for (uint32_t x = start_x; x < end_x; x++) {
+            if (fb_get_pixel(x, y) != bg) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 void fb_backspace()
 {
-    uint32_t new_x = cursor.x;
-    uint32_t new_y = cursor.y;
+    fb_erase_cursor();
+
     if (cursor.x == 0) {
         if (cursor.y == 0) {
             bell();
+            fb_draw_cursor();
             return;
         }
-        new_y -= char_height;
-        new_x = fb->width - char_width;
-    } else {
-        new_x -= char_width;
-    }
-    fb_set_cursor(new_x, new_y);
-    fb_erase_cursor();
-    fb_putchar_at(' ', cursor.x, cursor.y);
-    if (cursor.visible) {
+        // TODO: handle backspace at the beginning of a line to wrap to the
+        // previous line.
+        bell();
         fb_draw_cursor();
+        return;
+    }
+
+    cursor.x -= char_width;
+
+    if (!fb_is_region_empty(cursor.x + char_width, cursor.y, fb->width,
+                            cursor.y + char_height)) {
+        log_debug("shifting characters left");
+        for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+            memmove(&fb_ptr[y * pitch_in_pixels + cursor.x],
+                    &fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+                    (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+        }
+
+        fb_draw_rect(fb->width - char_width, cursor.y, char_width, char_height,
+                     bg);
+
+        fb_draw_cursor();
+    } else {
+        fb_clear_region(cursor.x, cursor.y, cursor.x + char_width,
+                        cursor.y + char_height);
     }
 }
 
 void fb_delete()
 {
-    // TODO: implement delete function
+    fb_cursor_right();
+    fb_backspace();
 }
 
 void fb_cursor_left()
@@ -287,10 +384,11 @@ void fb_newline()
 
 void fb_scroll()
 {
-    if (cursor.visible) {
+    bool was_cursor_visible = cursor.visible;
+    if (was_cursor_visible) {
         fb_erase_cursor(); // don't copy the cursor
     }
-    memmove(fb_ptr, fb_ptr + char_height * (fb->pitch / 4),
+    memmove(fb_ptr, fb_ptr + char_height * pitch_in_pixels,
             (fb->height - char_height) * fb->pitch);
 
     for (uint32_t y = fb->height - char_height; y < fb->height; y++) {
@@ -298,7 +396,7 @@ void fb_scroll()
             fb_put_pixel(x, y, bg);
         }
     }
-    if (cursor.visible) {
+    if (was_cursor_visible) {
         fb_draw_cursor();
     }
 }
@@ -330,20 +428,97 @@ void fb_char_test()
     }
 }
 
+void fb_rgb_test()
+{
+    for (uint32_t y = 0; y < fb->height; y++) {
+        for (uint32_t x = 0; x < fb->width; x++) {
+            double h = (double)x / fb->width * 360.0;
+            double s = 1.0;
+            double v = 1.0;
+
+            // convert to RGB
+            double c = v * s;
+            double x_prime = c * (1 - fabs(fmod(h / 60.0, 2) - 1));
+            double m = v - c;
+            double r_prime, g_prime, b_prime;
+
+            if (0 <= h && h < 60) {
+                r_prime = c;
+                g_prime = x_prime;
+                b_prime = 0;
+            } else if (60 <= h && h < 120) {
+                r_prime = x_prime;
+                g_prime = c;
+                b_prime = 0;
+            } else if (120 <= h && h < 180) {
+                r_prime = 0;
+                g_prime = c;
+                b_prime = x_prime;
+            } else if (180 <= h && h < 240) {
+                r_prime = 0;
+                g_prime = x_prime;
+                b_prime = c;
+            } else if (240 <= h && h < 300) {
+                r_prime = x_prime;
+                g_prime = 0;
+                b_prime = c;
+            } else { // 300 <= h && h < 360
+                r_prime = c;
+                g_prime = 0;
+                b_prime = x_prime;
+            }
+
+            uint8_t r = (uint8_t)((r_prime + m) * 255);
+            uint8_t g = (uint8_t)((g_prime + m) * 255);
+            uint8_t b = (uint8_t)((b_prime + m) * 255);
+
+            fb_put_pixel(x, y, (r << 16) | (g << 8) | b);
+        }
+    }
+}
+
 void fb_putchar(char c)
 {
     if (c == '\n') {
+        overwrite_mode = false;
         fb_newline();
         return;
     } else if (c == '\b') {
+        overwrite_mode = false;
         fb_backspace();
         return;
+    } else if (c == '\r') {
+        overwrite_mode = true;
+        fb_cursor_home();
+        return;
+    } else if (c == '\t') {
+        for (int i = 0; i < INDENT_WIDTH; i++) {
+            fb_putchar(' ');
+        }
+        return;
     } else if (c == 127) { // ASCII DEL
-        // fb_delete();
+        fb_delete();
         return;
     }
 
     fb_erase_cursor();
+
+    if (!overwrite_mode &&
+        !fb_is_region_empty(
+            cursor.x, cursor.y, cursor.x + char_width, // is there a character
+            cursor.y + char_height)) { // in front of the cursor? this is ugly,
+                                       // make a text buffer at some point
+        log_debug("shifting characters right");
+        for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+            memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+                    &fb_ptr[y * pitch_in_pixels + cursor.x],
+                    (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+        }
+    } else {
+        // A printable character is being written, disable overwrite mode.
+        overwrite_mode = false;
+    }
+
     fb_putchar_at(c, cursor.x, cursor.y);
     cursor.x += char_width;
     if (cursor.x >= fb->width) {
@@ -391,20 +566,17 @@ void fb_draw_title(const char *title)
 {
     fb_hide_cursor();
 
-    uint8_t height = 3;
-
-    // set bg early so cursor doesn't leave black lines
     fb_set_color(0, 0xffffff);
 
     // draw white block
-    fb_draw_rect(0, 0, fb->width, char_height * height, 0xffffff);
+    fb_draw_rect(0, 0, fb->width, char_height * TITLE_HEIGHT, 0xffffff);
 
     // draw text in middle of block
-    fb_set_cursor(0, floordiv2(height) * char_height);
+    fb_set_cursor(0, floordiv2(TITLE_HEIGHT) * char_height);
     fb_print_centered(title);
 
     // set cursor after title
-    fb_set_cursor(0, char_height * (height + 1));
+    fb_set_cursor(0, char_height * (TITLE_HEIGHT + 1));
 
     // restore settings
     fb_reset_color();

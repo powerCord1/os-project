@@ -5,6 +5,7 @@
 #include <heap.h>
 #include <init.h>
 #include <interrupts.h>
+#include <keyboard.h>
 #include <limine.h>
 #include <pit.h>
 #include <serial.h>
@@ -12,7 +13,7 @@
 
 void sys_init()
 {
-    serial_init();
+    serial_init(); // init serial early so we can get debug info
 
     log_verbose("Initializing Limine");
     limine_init();
@@ -28,4 +29,6 @@ void sys_init()
     heap_init();
     log_verbose("Initializing PIT");
     pit_init(1000);
+    log_verbose("Initializing keyboard");
+    kbd_init();
 }

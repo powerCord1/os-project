@@ -18,22 +18,22 @@ static uint16_t *term_buffer = (uint16_t *)VGA_MEMORY;
 
 void term_init()
 {
-    // term_cursor_y = 0;
-    // term_cursor_x = 0;
-    // term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    // term_clear();
-    // enable_cursor();
+    term_cursor_y = 0;
+    term_cursor_x = 0;
+    term_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    term_clear();
+    enable_cursor();
 }
 
 void term_clear()
 {
-    // for (size_t y = 0; y < VGA_HEIGHT; y++) {
-    //     for (size_t x = 0; x < VGA_WIDTH; x++) {
-    //         const size_t index = y * VGA_WIDTH + x;
-    //         term_buffer[index] = vga_entry(' ', term_color);
-    //     }
-    // }
-    // term_set_cursor(0, 0);
+    for (size_t y = 0; y < VGA_HEIGHT; y++) {
+        for (size_t x = 0; x < VGA_WIDTH; x++) {
+            const size_t index = y * VGA_WIDTH + x;
+            term_buffer[index] = vga_entry(' ', term_color);
+        }
+    }
+    term_set_cursor(0, 0);
 }
 
 void term_set_cursor(size_t x, size_t y)

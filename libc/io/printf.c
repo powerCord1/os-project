@@ -102,7 +102,6 @@ int vprintf_generic(int (*putc_func)(int),
             // to support flags and width, so we just fall through.
         }
 
-        // Parse flags, width, and length modifiers
         if (*format == '0') {
             zero_pad = true;
             format++;
@@ -145,14 +144,19 @@ int vprintf_generic(int (*putc_func)(int),
             char str[12]; // Max 11 chars for a 32-bit signed int + null
             itoa(str, i);
             size_t len = strlen(str);
-            if (maxrem < len) {
+            int padding = (width > (int)len) ? (width - len) : 0;
+
+            if (maxrem < len + padding) {
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
+            }
+            for (int j = 0; j < padding; j++) {
+                putc_func(zero_pad ? '0' : ' ');
             }
             if (!print(putc_func, str, len)) {
                 return -1;
             }
-            written += len;
+            written += len + padding;
             continue;
         } else if (*format == 'u') {
             format++;
@@ -160,14 +164,19 @@ int vprintf_generic(int (*putc_func)(int),
             char str[11]; // Max 10 chars for a 32-bit unsigned int + null
             uitoa(str, i);
             size_t len = strlen(str);
-            if (maxrem < len) {
+            int padding = (width > (int)len) ? (width - len) : 0;
+
+            if (maxrem < len + padding) {
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
+            }
+            for (int j = 0; j < padding; j++) {
+                putc_func(zero_pad ? '0' : ' ');
             }
             if (!print(putc_func, str, len)) {
                 return -1;
             }
-            written += len;
+            written += len + padding;
             continue;
         } else {
             format = format_begun_at;

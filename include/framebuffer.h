@@ -1,6 +1,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define BELL_FREQ 4750
+#define INDENT_WIDTH 4
+
 extern struct limine_framebuffer *fb;
 extern volatile uint32_t *fb_ptr;
 
@@ -16,6 +19,10 @@ void bell();
 void fb_clear();
 void fb_clear_region(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                      uint32_t end_y);
+void fb_clear_line(uint32_t line_num);
+void fb_clear_vp();
+bool fb_is_region_empty(uint32_t start_x, uint32_t start_y, uint32_t end_x,
+                        uint32_t end_y);
 void fb_set_color(uint32_t _fg, uint32_t _bg);
 void fb_set_fg(uint32_t _fg);
 void fb_set_bg(uint32_t _bg);
@@ -28,11 +35,14 @@ void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                   uint32_t color);
 void fb_draw_line(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                   uint32_t end_y);
+void fb_draw_circle(uint32_t center_x, uint32_t center_y, int radius,
+                    uint32_t color, bool filled);
 void fb_putchar(char c);
 void fb_putchar_at(char c, uint32_t x_pos, uint32_t y_pos);
 void fb_print_string(const char *str);
 void fb_matrix_test();
 void fb_char_test();
+void fb_rgb_test();
 void fb_draw_title(const char *title);
 void fb_newline();
 void fb_backspace();

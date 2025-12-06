@@ -109,8 +109,7 @@ run_debug: $(TARGET)
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -s -S
 
 run_cdrom: $(ISO_TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
-
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
 

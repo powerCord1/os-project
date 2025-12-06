@@ -5,6 +5,7 @@
 #include <framebuffer.h>
 #include <interrupts.h>
 #include <io.h>
+#include <pit.h>
 #include <power.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +25,7 @@ __attribute__((noreturn)) void reboot()
     fb_clear();
     printf("Rebooting...");
     log_info("Rebooting...");
+    wait_for_render();
     disable_interrupts();
 
     sys_reset();
@@ -33,7 +35,7 @@ __attribute__((noreturn)) void reboot()
     printf("System was unable to reboot\n"
            "You can manually power off the system by pressing the power"
            "button");
-    halt_catch_fire();
+    halt_cf();
 }
 
 void sys_reset()
@@ -46,6 +48,7 @@ __attribute__((noreturn)) void shutdown()
     fb_clear();
     printf("Shutting down...");
     log_info("Shutting down...");
+    wait_for_render();
     disable_interrupts();
 
     sys_poweroff();
@@ -53,9 +56,9 @@ __attribute__((noreturn)) void shutdown()
     // system should have powered off by now, in case it hasn't, show a message
     fb_clear();
     printf("System was unable to shut down\n"
-           "Please manually power off the system by pressing the power"
+           "Please manually power off the system by pressing the power "
            "button.");
-    halt_catch_fire();
+    halt_cf();
 }
 
 void sys_poweroff()
@@ -65,4 +68,9 @@ void sys_poweroff()
     outw(SHUTDOWN_PORT_VBOX, SHUTDOWN_SIG_VBOX);   // vbox
     outw(SHUTDOWN_PORT_CLOUD_HYPERVISOR,
          SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
+}
+
+static void wait_for_render()
+{
+    pit_wait_ms(50);
 }

@@ -10,6 +10,7 @@ char *strtok(char *str, const char *delim);
 char *strpbrk(const char *str, const char *accept);
 size_t strspn(const char *str, const char *accept);
 size_t strlen(const char *str);
+char *strdup(const char *s);
 
 char *itoa(char *dest, int n);
 char *uitoa(char *dest, unsigned int n);

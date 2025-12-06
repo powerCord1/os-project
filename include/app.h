@@ -1,6 +1,10 @@
 void typewriter_main();
 void heap_test_main();
+void memory_test_main();
 void key_notes_main();
 void shell_main();
 void ssp_test_main();
 void element_test();
+void pit_test_main();
+void sin_test_main();
+void random_test_main();

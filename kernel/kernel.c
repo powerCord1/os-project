@@ -6,7 +6,6 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
-#include <graphics.h>
 #include <init.h>
 #include <interrupts.h>
 #include <keyboard.h>
@@ -48,25 +47,4 @@ void main(unsigned long magic, unsigned long addr)
 __attribute__((noreturn)) void main_exit()
 {
     panic("init exited");
-}
-
-void main_menu()
-{
-    menu_t apps[] = {{"Typewriter", &typewriter_main},
-                     {"Key notes", &key_notes_main},
-                     {"Heap test", &heap_test_main},
-                     {"Shell", &shell_main},
-                     {"Stack Smash Test", &ssp_test_main},
-                     {"Element drawing test", &element_test}};
-    create_menu("Main menu", "Choose an app to launch", apps,
-                sizeof(apps) / sizeof(menu_t));
-}
-
-void power_menu()
-{
-    log_info("Entering power menu");
-    menu_t options[] = {{"Reboot", &reboot}, {"Shutdown", &shutdown}};
-    create_menu("Power menu", "Select an option:", options,
-                sizeof(options) / sizeof(menu_t));
-    fb_clear();
 }

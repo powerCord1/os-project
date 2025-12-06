@@ -3,12 +3,14 @@
 #include <stdint.h>
 
 #include <cpu.h>
+#include <debug.h>
 #include <interrupts.h>
 #include <pit.h>
 #include <stdio.h>
 
 void cpu_init()
 {
+    log_verbose("Enabling SIMD extensions");
     sse_init();
 }
 
@@ -17,7 +19,7 @@ void halt()
     __asm__ volatile("hlt");
 }
 
-__attribute__((noreturn)) void halt_catch_fire()
+__attribute__((noreturn)) void halt_cf()
 {
     disable_interrupts();
     while (1) {
@@ -56,4 +58,11 @@ void sse_init()
     cr4 |= (1 << 9);  // Set OSFXSR bit
     cr4 |= (1 << 10); // Set OSXMMEXCPT bit
     __asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
+}
+
+bool is_apic_enabled()
+{
+    unsigned int eax, ebx, ecx, edx;
+    __cpuid(1, eax, ebx, ecx, edx);
+    return (edx & (1 << 9));
 }

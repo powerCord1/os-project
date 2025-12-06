@@ -6,6 +6,7 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
+#include <heap.h>
 #include <keyboard.h>
 #include <panic.h>
 #include <pit.h>
@@ -14,15 +15,16 @@
 #include <stdio.h>
 
 const char *shell_prompt = "> ";
-char input_buffer[256];
+char input_buffer[512];
 bool exit;
 
 #define MAX_HISTORY 1024
-static char command_history[MAX_HISTORY][256];
+static char *command_history[MAX_HISTORY];
 static int history_count = 0;
 static int history_index = 0;
-static char current_input_buffer[256];
+static char current_input_buffer[512];
 static bool is_recall_active = false;
+static bool daylight_savings_enabled = false;
 
 const cmd_list_t cmds[] = {{"clear", &cmd_clear},
                            {"exit", &cmd_exit},
@@ -35,7 +37,9 @@ const cmd_list_t cmds[] = {{"clear", &cmd_clear},
                            {"soundtest", &cmd_sound_test},
                            {"history", &cmd_history},
                            {"sysinfo", &cmd_sysinfo},
-                           {"fbtest", &cmd_fbtest}};
+                           {"fbtest", &cmd_fbtest},
+                           {"rgbtest", &cmd_rgbtest},
+                           {"memtest", &cmd_memtest}};
 
 uint8_t cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
 
@@ -60,6 +64,19 @@ void shell_main()
                     i--;
                     input_buffer[i] = '\0';
                     putchar('\b');
+                }
+                continue;
+            } else if (key.scancode == KEY_DELETE) {
+                fb_delete();
+                continue;
+            } else if (key.key == '\t') {
+                for (int j = 0; j < INDENT_WIDTH; j++) {
+                    if (i < (sizeof(input_buffer) - 1)) {
+                        input_buffer[i++] = ' ';
+                        putchar(' ');
+                    } else {
+                        break;
+                    }
                 }
                 continue;
             } else if (key.scancode == KEY_ARROW_UP) {
@@ -105,7 +122,14 @@ void shell_main()
                     printf("%s", input_buffer);
                 }
                 continue;
+            } else if (kbd_modifiers.ctrl && key.scancode == KEY_C) {
+                printf("^C\n");
+                i = 0;
+                memset(input_buffer, 0, sizeof(input_buffer));
+                key.scancode = KEY_ENTER; // break out of the inner loop
+                continue;
             }
+
             if (i < (sizeof(input_buffer) - 1) && key.key != 0 &&
                 key.key != '\n') {
                 input_buffer[i++] = key.key;
@@ -114,11 +138,17 @@ void shell_main()
         }
         if (i > 0) {
             if (history_count < MAX_HISTORY) {
-                strcpy(command_history[history_count++], input_buffer);
+                command_history[history_count] =
+                    malloc(strlen(input_buffer) + 1);
+                strcpy(command_history[history_count], input_buffer);
+                history_count++;
             } else {
+                free(command_history[0]);
                 for (int j = 0; j < MAX_HISTORY - 1; j++) {
-                    strcpy(command_history[j], command_history[j + 1]);
+                    command_history[j] = command_history[j + 1];
                 }
+                command_history[MAX_HISTORY - 1] =
+                    malloc(strlen(input_buffer) + 1);
                 strcpy(command_history[MAX_HISTORY - 1], input_buffer);
             }
             history_index = history_count;
@@ -128,6 +158,10 @@ void shell_main()
         }
         key.key = 0;
         key.scancode = 0;
+    }
+
+    for (int i = 0; i < history_count; i++) {
+        free(command_history[i]);
     }
 }
 
@@ -165,7 +199,7 @@ void cmd_history(int argc, char **argv)
 
 void cmd_clear(int argc, char **argv)
 {
-    fb_clear();
+    fb_clear_vp();
 }
 
 void cmd_exit(int argc, char **argv)
@@ -199,11 +233,24 @@ void cmd_help(int argc, char **argv)
 
 void cmd_date(int argc, char **argv)
 {
-    datetime_t datetime;
-    cmos_get_data(&datetime);
+    if (argc > 1 && strcmp(argv[1], "--toggle-daylight-savings") == 0) {
+        daylight_savings_enabled = !daylight_savings_enabled;
+        printf("Daylight savings %s\n",
+               daylight_savings_enabled ? "enabled" : "disabled");
+        return;
+    }
 
-    printf("%d/%d/%d %d:%d:%d\n", datetime.day, datetime.month, datetime.year,
-           datetime.hour, datetime.minute, datetime.second);
+    datetime_t datetime;
+    cmos_get_datetime(&datetime);
+
+    if (daylight_savings_enabled) {
+        datetime.hour = (datetime.hour + 1) % 24;
+        // Note: This is a simplified implementation. A full implementation
+        // would also handle date changes when the time crosses midnight.
+    }
+
+    printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month,
+           datetime.year, datetime.hour, datetime.minute, datetime.second);
 }
 
 void cmd_shutdown(int argc, char **argv)
@@ -239,9 +286,55 @@ void cmd_sysinfo(int argc, char **argv)
     printf("CR3:    0x%016lx\n", cr3);
     printf("CR4:    0x%016lx\n", cr4);
     printf("RFLAGS: 0x%016lx\n", rflags);
+
+    printf("APIC:   %s\n", is_apic_enabled() ? "enabled" : "disabled");
 }
 
 void cmd_fbtest(int argc, char **argv)
 {
     fb_matrix_test();
+}
+
+void cmd_rgbtest(int argc, char **argv)
+{
+    fb_rgb_test();
+}
+
+void cmd_memtest(int argc, char **argv)
+{
+    printf("Running memory test...\n");
+
+    // memset
+    char memset_buf[10];
+    memset(memset_buf, 'A', 10);
+    bool memset_ok = true;
+    for (int i = 0; i < 10; i++) {
+        if (memset_buf[i] != 'A') {
+            memset_ok = false;
+            break;
+        }
+    }
+    printf("memset: %s\n", memset_ok ? "PASS" : "FAIL");
+
+    // memcpy
+    char memcpy_src[] = "Hello";
+    char memcpy_dst[6];
+    memcpy(memcpy_dst, memcpy_src, 6);
+    printf("memcpy: %s\n",
+           strcmp(memcpy_src, memcpy_dst) == 0 ? "PASS" : "FAIL");
+
+    // memcmp
+    char memcmp_buf1[] = "Test";
+    char memcmp_buf2[] = "Test";
+    char memcmp_buf3[] = "Fail";
+    printf("memcmp (equal): %s\n",
+           memcmp(memcmp_buf1, memcmp_buf2, 5) == 0 ? "PASS" : "FAIL");
+    printf("memcmp (unequal): %s\n",
+           memcmp(memcmp_buf1, memcmp_buf3, 5) != 0 ? "PASS" : "FAIL");
+
+    // memmove
+    char memmove_buf[] = "123456789";
+    memmove(memmove_buf + 2, memmove_buf, 5); // overlapping
+    printf("memmove (overlap): %s\n",
+           strcmp(memmove_buf, "121234589") == 0 ? "PASS" : "FAIL");
 }

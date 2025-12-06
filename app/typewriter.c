@@ -14,7 +14,7 @@ void typewriter_main()
 
         switch (key.scancode) {
         case KEY_ESC:
-            break;
+            return;
         case KEY_ARROW_LEFT:
             fb_cursor_left();
             ;
@@ -43,6 +43,5 @@ void typewriter_main()
             printf("%c", c);
             continue;
         }
-        break;
     }
 }

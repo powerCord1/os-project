@@ -57,6 +57,10 @@ void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
 
 void idt_init()
 {
+    if (is_apic_enabled()) {
+        log_verbose("APIC enabled");
+    }
+
     idtr.base = (uint64_t)&idt[0];
     idtr.limit = (uint16_t)sizeof(idt_entry_t) * IDT_ENTRIES - 1;
 
@@ -134,5 +138,5 @@ void idt_init()
 
 void idt_load()
 {
-    __asm__ volatile("lidt %0" : : "m"(idtr));
+    __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
 }
