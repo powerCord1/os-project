@@ -1,5 +1,8 @@
 # Operating system development project
 
 ## Requirements:
-- i686-elf-gcc
+- xorriso
+- binutils
+- make
+- limine
 - QEMU for emulating
