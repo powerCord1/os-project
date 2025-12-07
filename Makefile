@@ -1,8 +1,11 @@
 # Allow explicit compiler specification via CROSS_PREFIX
 # e.g., make CROSS_PREFIX=x86_64-elf-
+# Set a default if not provided
 CC = $(CROSS_PREFIX)gcc
 AS = $(CROSS_PREFIX)as
 LD = $(CROSS_PREFIX)gcc
+
+ARCH ?= x86_64
 
 SRCDIR = .
 BUILDDIR = build
@@ -65,20 +68,20 @@ else
     CFLAGS += -mno-red-zone \
 			-march=x86-64 \
 			-mcmodel=kernel
-  else
+#   else
     # No cross-compiler detected - this will fail because:
     # - C code has x86-64 inline assembly that ARM assembler can't handle
     # - Assembly files are x86-64 specific
-    $(error Cannot compile x86_64 code without a cross-compiler. \
-            The code contains x86-64 specific inline assembly and assembly files. \
-            Please install a cross-compiler or set CROSS_PREFIX. \
-            \
-            To install on Ubuntu/Debian: \
-              sudo apt-get install gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu \
-            Then use: make CROSS_PREFIX=x86_64-linux-gnu- \
-            \
-            Or for a bare-metal toolchain, install x86_64-elf-gcc and use: \
-              make CROSS_PREFIX=x86_64-elf-)
+#     $(error Cannot compile x86_64 code without a cross-compiler. \
+#             The code contains x86-64 specific inline assembly and assembly files. \
+#             Please install a cross-compiler or set CROSS_PREFIX. \
+#             \
+#             To install on Ubuntu/Debian: \
+#               sudo apt-get install gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu \
+#             Then use: make CROSS_PREFIX=x86_64-linux-gnu- \
+#             \
+#             Or for a bare-metal toolchain, install x86_64-elf-gcc and use: \
+#               make CROSS_PREFIX=x86_64-elf-)
   endif
 endif
 
@@ -97,8 +100,8 @@ OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
 all: $(TARGET)
 
-run: $(TARGET)
-	qemu-system-x86_64 -kernel $(TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
+run: $(ISO_TARGET)
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
 run_noaudio: $(TARGET)
 	@echo "Note: Using multiboot protocol. If this fails, try 'make run_cdrom' instead."
@@ -110,8 +113,6 @@ run_noaudio_cdrom: $(ISO_TARGET)
 run_debug: $(TARGET)
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -s -S
 
-run_cdrom: $(ISO_TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
 
