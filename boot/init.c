@@ -15,6 +15,8 @@ void sys_init()
 {
     serial_init(); // init serial early so we can get debug info
 
+    log_info("Build version: %s", BUILD_VERSION);
+
     log_verbose("Initializing Limine");
     limine_init();
     log_verbose("Initializing framebuffer");

@@ -6,12 +6,14 @@ SRCDIR = .
 BUILDDIR = build
 INCLUDEDIR = include
 LIMINEDIR = /usr/share/limine
+VERSION := $(shell ./buildscripts/version.sh)
 
 CFLAGS = -std=gnu99 \
 		 -ffreestanding \
 		 -O2 \
 		 -Wall \
 		 -Wextra \
+		 -DBUILD_VERSION="\"$(VERSION)\"" \
 		 -I$(INCLUDEDIR) \
 		 -mno-red-zone \
 		 -fno-stack-protector \
