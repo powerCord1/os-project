@@ -3,7 +3,6 @@
 
 #define M_PI 3.14159265358979323846
 
-size_t floordiv2(size_t n);
 int abs(int n);
 double fabs(double x);
 double fmod(double x, double y);
