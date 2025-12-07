@@ -10,7 +10,10 @@ ARCH ?= x86_64
 SRCDIR = .
 BUILDDIR = build
 INCLUDEDIR = include
-VERSION := $(shell ./buildscripts/version.sh)
+
+BUILD_VERSION := $(shell ./buildscripts/version.sh)
+BUILD_TIME := $(shell date -u +'%Y-%m-%d %H:%M:%S')
+COMMIT := $(shell git rev-parse --short HEAD)
 
 # Auto-detect Limine installation directory
 # Check common locations, allow override via LIMINEDIR variable
@@ -44,6 +47,8 @@ CFLAGS = -std=gnu99 \
 		 -Wall \
 		 -Wextra \
 		 -DBUILD_VERSION="\"$(VERSION)\"" \
+		 -DBUILD_TIME="\"$(BUILD_TIME)\"" \
+		 -DCOMMIT="\"$(COMMIT)\"" \
 		 -I$(INCLUDEDIR) \
 		 -fno-stack-protector \
 		 -fno-stack-check \
@@ -167,4 +172,4 @@ format:
 
 rebuild: clean all
 
-.PHONY: all clean rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom
+.PHONY: all _build clean rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands
