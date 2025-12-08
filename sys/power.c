@@ -70,7 +70,7 @@ void sys_poweroff()
          SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
 }
 
-static void wait_for_render()
+void wait_for_render()
 {
     pit_wait_ms(50);
 }

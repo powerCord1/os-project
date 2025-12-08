@@ -1,3 +1,4 @@
+#pragma once
 #include <stdint.h>
 
 typedef void (*cmd_func_t)(int argc, char **argv);
@@ -7,8 +8,7 @@ typedef struct {
     cmd_func_t func;
 } cmd_list_t;
 
-void shell_main();
-void process_cmd(char *cmd);
+#define MAX_HISTORY 1024
 
 void cmd_clear(int argc, char **argv);
 void cmd_exit(int argc, char **argv);
@@ -24,3 +24,12 @@ void cmd_sysinfo(int argc, char **argv);
 void cmd_fbtest(int argc, char **argv);
 void cmd_rgbtest(int argc, char **argv);
 void cmd_memtest(int argc, char **argv);
+
+extern const cmd_list_t cmds[];
+extern uint8_t cmd_count;
+extern bool exit;
+extern char *command_history[MAX_HISTORY];
+extern int history_count;
+
+void shell_main();
+void process_cmd(char *cmd);

@@ -9,7 +9,7 @@
 #include <limine_defs.h>
 #include <math.h>
 #include <panic.h>
-#include <pit.h>
+#include <sound.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -120,7 +120,7 @@ void fb_reset_color()
 
 void bell()
 {
-    pit_request_beep(BELL_FREQ);
+    request_beep(BELL_FREQ);
 }
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
@@ -534,12 +534,16 @@ void fb_putchar(char c)
 
 void fb_putchar_at(char c, uint32_t x_pos, uint32_t y_pos)
 {
-    const unsigned char *char_bitmap = font_bitmap[(unsigned char)c];
+    uint8_t *glyph = get_font_glyph(c);
+    if (!glyph) {
+        // draw hollow rectangle for missing characters
+        fb_draw_rect(x_pos, y_pos, char_width, char_height, bg);
+        return;
+    }
 
     for (uint32_t y = 0; y < char_height; y++) {
-        uint8_t row = char_bitmap[y];
         for (uint32_t x = 0; x < char_width; x++) {
-            if ((row >> (char_width - 1 - x)) & 1) {
+            if ((glyph[y] >> (char_width - 1 - x)) & 1) {
                 fb_put_pixel(x_pos + x, y_pos + y, fg);
             } else {
                 fb_put_pixel(x_pos + x, y_pos + y, bg);

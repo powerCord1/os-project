@@ -46,7 +46,7 @@ CFLAGS = -std=gnu99 \
 		 -O2 \
 		 -Wall \
 		 -Wextra \
-		 -DBUILD_VERSION="\"$(VERSION)\"" \
+		 -DBUILD_VERSION="\"$(BUILD_VERSION)\"" \
 		 -DBUILD_TIME="\"$(BUILD_TIME)\"" \
 		 -DCOMMIT="\"$(COMMIT)\"" \
 		 -I$(INCLUDEDIR) \
@@ -97,7 +97,7 @@ TARGET = $(BUILDDIR)/os.bin
 ISO_TARGET = $(BUILDDIR)/os.iso
 
 # Find source files
-C_SOURCES_REGULAR = $(filter-out data/%.c, $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*'))
+C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*')
 ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*')
 DATA_SOURCES = $(wildcard data/*)
 RESOURCE_C_SOURCES = $(patsubst data/%,data/%.c,$(filter-out %.c,$(DATA_SOURCES)))

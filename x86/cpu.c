@@ -5,7 +5,7 @@
 #include <cpu.h>
 #include <debug.h>
 #include <interrupts.h>
-#include <pit.h>
+#include <sound.h>
 #include <stdio.h>
 
 void cpu_init()
@@ -34,7 +34,7 @@ char get_cpu_vendor()
 
 void idle()
 {
-    pit_check_beep();
+    check_beep();
     halt();
 }
 

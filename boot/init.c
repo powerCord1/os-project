@@ -1,5 +1,6 @@
 #include <cpu.h>
 #include <debug.h>
+#include <font.h>
 #include <framebuffer.h>
 #include <gdt.h>
 #include <heap.h>
@@ -21,6 +22,8 @@ void sys_init()
 
     log_verbose("Initializing Limine");
     limine_init();
+    log_verbose("Initializing PSF font");
+    font_init();
     log_verbose("Initializing framebuffer");
     fb_init();
     log_verbose("Initializing CPU features");

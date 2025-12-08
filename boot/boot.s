@@ -6,7 +6,6 @@ header_start:
     .long header_end - header_start # header length
     .long -(0xE85250D6 + 0 + (header_end - header_start)) # checksum
 
-    # Relocatable header tag
     .word 5 # type
     .word 0 # flags
     .long 24 # size
@@ -15,7 +14,6 @@ header_start:
     .long 4096 # align
     .long 0 # preference
 
-    # End tag
     .word 0 # type
     .word 0 # flags
     .long 8 # size
@@ -38,7 +36,6 @@ _start:
 
 	call main
     call main_exit
-	cli
 
 1:	hlt
 	jmp 1b

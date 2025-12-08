@@ -1,4 +1,4 @@
 #pragma once
 
-static unsigned char default8x16_psfu[];
-static unsigned int default8x16_psfu_len;
+extern const unsigned char default_font_psfu[];
+extern const unsigned int default_font_psfu_len;

@@ -3,7 +3,7 @@
 #include <app.h>
 #include <debug.h>
 #include <keyboard.h>
-#include <pit.h>
+#include <sound.h>
 
 void key_notes_main()
 {
@@ -13,6 +13,6 @@ void key_notes_main()
             break;
         }
         uint32_t freq = 250 + (scancode * 100);
-        pit_request_beep(freq);
+        request_beep(freq);
     }
 }

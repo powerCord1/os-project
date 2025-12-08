@@ -4,7 +4,7 @@
 
 #include <debug.h>
 #include <math.h>
-#include <pit.h>
+#include <sound.h>
 #include <string.h>
 #include <tty.h>
 #include <vga.h>
@@ -126,7 +126,7 @@ void term_cursor_back(bool delete)
         term_cursor_x = VGA_WIDTH - 1;
     } else {
         // bell at 0,0
-        pit_request_beep(1000);
+        request_beep(1000);
         return;
     }
 
@@ -158,7 +158,7 @@ void term_cursor_up()
     if (term_cursor_y > 0) {
         term_cursor_y--;
     } else {
-        pit_request_beep(1000);
+        request_beep(1000);
         return;
     }
     term_update_cursor();
@@ -169,7 +169,7 @@ void term_cursor_down()
     if (term_cursor_y < VGA_HEIGHT - 1) {
         term_cursor_y++;
     } else {
-        pit_request_beep(1000);
+        request_beep(1000);
         return;
     }
     term_update_cursor();
