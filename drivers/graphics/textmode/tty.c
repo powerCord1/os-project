@@ -245,8 +245,8 @@ void term_newline()
 
 void term_print_centered(const char *text)
 {
-    uint8_t screen_midpoint = floordiv2(VGA_WIDTH);
-    uint8_t text_midpoint = floordiv2(strlen(text));
+    uint8_t screen_midpoint = VGA_WIDTH / 2;
+    uint8_t text_midpoint = strlen(text) / 2;
 
     term_cursor_x = screen_midpoint - text_midpoint;
     term_writestring(text);
@@ -282,7 +282,7 @@ void term_draw_title(const char *text)
     }
 
     // draw text in middle of block
-    term_set_cursor(0, floordiv2(height));
+    term_set_cursor(0, height / 2);
     term_print_centered(text);
 
     // set cursor after title

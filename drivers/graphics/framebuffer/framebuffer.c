@@ -572,7 +572,7 @@ void fb_draw_title(const char *title)
     fb_draw_rect(0, 0, fb->width, char_height * TITLE_HEIGHT, 0xffffff);
 
     // draw text in middle of block
-    fb_set_cursor(0, floordiv2(TITLE_HEIGHT) * char_height);
+    fb_set_cursor(0, TITLE_HEIGHT / 2 * char_height);
     fb_print_centered(title);
 
     // set cursor after title

@@ -96,8 +96,12 @@ LDFLAGS = -T linker.ld -ffreestanding -O2 -nostdlib -lgcc -no-pie
 TARGET = $(BUILDDIR)/os.bin
 ISO_TARGET = $(BUILDDIR)/os.iso
 
-C_SOURCES = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*')
+# Find source files
+C_SOURCES_REGULAR = $(filter-out data/%.c, $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*'))
 ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*')
+DATA_SOURCES = $(wildcard data/*)
+RESOURCE_C_SOURCES = $(patsubst data/%,data/%.c,$(filter-out %.c,$(DATA_SOURCES)))
+C_SOURCES = $(C_SOURCES_REGULAR) $(RESOURCE_C_SOURCES)
 
 C_OBJECTS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(C_SOURCES))
 ASM_OBJECTS = $(patsubst $(SRCDIR)/%.s,$(BUILDDIR)/%.o,$(ASM_SOURCES))
@@ -118,19 +122,23 @@ run_noaudio_cdrom: $(ISO_TARGET)
 run_debug: $(TARGET)
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -s -S
 
+data/%.c: data/%
+	@echo "Generating C source for $<..."
+	@./buildscripts/resources.sh
+
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
 
 $(TARGET): $(OBJECTS) | $(BUILDDIR)
 	@echo "Linking $(TARGET)..."
 	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
-
-$(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
+	
+$(BUILDDIR)/%.o: $(SRCDIR)/%.c
 	@echo "Compiling $<..."
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/%.o: $(SRCDIR)/%.s | $(BUILDDIR)
+	
+$(BUILDDIR)/%.o: $(SRCDIR)/%.s
 	@echo "Assembling $<..."
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@

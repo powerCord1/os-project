@@ -12,21 +12,6 @@
 			"command": "make run",
 			"problemMatcher": [],
 			"group": {
-				"kind": "test"
-			},
-			"presentation": {
-				"echo": true,
-				"reveal": "always",
-				"panel": "shared",
-				"close": true
-			}
-		},
-		{
-			"label": "Build and run cdrom",
-			"type": "shell",
-			"command": "make run_cdrom",
-			"problemMatcher": [],
-			"group": {
 				"kind": "test",
 				"isDefault": true
 			},
