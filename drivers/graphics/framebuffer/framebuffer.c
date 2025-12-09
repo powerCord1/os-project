@@ -5,6 +5,7 @@
 #include <debug.h>
 #include <font.h>
 #include <framebuffer.h>
+#include <image.h>
 #include <limine.h>
 #include <limine_defs.h>
 #include <math.h>
@@ -14,6 +15,7 @@
 #include <string.h>
 
 #define TITLE_HEIGHT 3
+#define OPTIMISATION_ENABLED 0
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
@@ -125,6 +127,14 @@ void bell()
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
+#if !OPTIMISATION_ENABLED
+    if (x >= fb->width || y >= fb->height) {
+        log_err(
+            "tried to plot pixel outside of framebuffer boundaries: x=%d, y=%d",
+            x, y);
+        return;
+    }
+#endif
     fb_ptr[y * pitch_in_pixels + x] = color;
 }
 
@@ -219,6 +229,22 @@ void fb_draw_circle(uint32_t center_x, uint32_t center_y, int radius,
         }
     } else {
         fb_draw_arc(center_x, center_y, radius, 0, 360, color);
+    }
+}
+
+void fb_draw_image(image_t *image, uint32_t x, uint32_t y)
+{
+    if (image->width + x > fb->width || image->height + y > fb->height) {
+        log_err("image too large for framebuffer");
+        return;
+    }
+
+    for (uint32_t i = 0; i < image->height; i++) {
+        for (uint32_t j = 0; j < image->width; j++) {
+            uint32_t pixel_color =
+                ((uint32_t *)image->data)[i * image->width + j];
+            fb_put_pixel(x + j, y + i, pixel_color);
+        }
     }
 }
 

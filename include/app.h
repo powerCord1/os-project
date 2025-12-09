@@ -8,3 +8,4 @@ void element_test();
 void pit_test_main();
 void sin_test_main();
 void random_test_main();
+void bmp_test_main();

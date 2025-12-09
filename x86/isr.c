@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include <debug.h>
 #include <isr.h>
 #include <keyboard.h>
 #include <panic.h>
@@ -11,8 +12,38 @@
 #define ISR_STUB(n, string)                                                    \
     __attribute__((naked)) void isr_##n()                                      \
     {                                                                          \
-        __asm__ volatile("push $0\n"); /* push dummy error code */             \
-        panic(string);                                                         \
+        __asm__ volatile("push %rdi\n"                                         \
+                         "push %rsi\n"                                         \
+                         "push %rdx\n"                                         \
+                         "push %rcx\n"                                         \
+                         "push %rbx\n"                                         \
+                         "push %rax\n"                                         \
+                         "push %rbp\n"                                         \
+                         "push %r8\n"                                          \
+                         "push %r9\n"                                          \
+                         "push %r10\n"                                         \
+                         "push %r11\n"                                         \
+                         "push %r12\n"                                         \
+                         "push %r13\n"                                         \
+                         "push %r14\n"                                         \
+                         "push %r15\n"                                         \
+                                                                               \
+                         "pop %r15\n"                                          \
+                         "pop %r14\n"                                          \
+                         "pop %r13\n"                                          \
+                         "pop %r12\n"                                          \
+                         "pop %r11\n"                                          \
+                         "pop %r10\n"                                          \
+                         "pop %r9\n"                                           \
+                         "pop %r8\n"                                           \
+                         "pop %rbp\n"                                          \
+                         "pop %rax\n"                                          \
+                         "pop %rbx\n"                                          \
+                         "pop %rcx\n"                                          \
+                         "pop %rdx\n"                                          \
+                         "pop %rsi\n"                                          \
+                         "pop %rdi\n"                                          \
+                         "iretq\n");                                           \
     }
 
 #define ISR_STUB_ERR(n, string)                                                \

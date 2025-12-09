@@ -1,6 +1,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <image.h>
+
 #define BELL_FREQ 4750
 #define INDENT_WIDTH 4
 
@@ -37,6 +39,7 @@ void fb_draw_line(uint32_t start_x, uint32_t start_y, uint32_t end_x,
                   uint32_t end_y);
 void fb_draw_circle(uint32_t center_x, uint32_t center_y, int radius,
                     uint32_t color, bool filled);
+void fb_draw_image(image_t *image, uint32_t x, uint32_t y);
 void fb_putchar(char c);
 void fb_putchar_at(char c, uint32_t x_pos, uint32_t y_pos);
 void fb_print_string(const char *str);
