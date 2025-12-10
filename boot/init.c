@@ -1,7 +1,9 @@
+#include <ata.h>
 #include <cpu.h>
 #include <debug.h>
 #include <font.h>
 #include <framebuffer.h>
+#include <fs.h>
 #include <gdt.h>
 #include <heap.h>
 #include <init.h>
@@ -20,6 +22,11 @@ void sys_init()
     log_info("Build time: %s", BUILD_TIME);
     log_info("Commit: %s", COMMIT);
 
+    store_boot_time();
+    log_info("Boot time: %d/%d/%d %d:%d:%d", boot_time.day, boot_time.month,
+             boot_time.year, boot_time.hour, boot_time.minute,
+             boot_time.second);
+
     log_verbose("Initializing Limine");
     limine_init();
     log_verbose("Initializing PSF font");
@@ -34,8 +41,21 @@ void sys_init()
     idt_init();
     log_verbose("Initializing heap");
     heap_init();
+    log_verbose("Initialising ATA driver");
+    ata_init();
+    log_verbose("Automounting file systems");
+    fs_init();
     log_verbose("Initializing PIT");
     pit_init(1000);
     log_verbose("Initializing keyboard");
     kbd_init();
+    log_verbose("Enabling interrupts");
+    enable_interrupts();
+    log_verbose("Waiting for an interrupt");
+    wait_for_interrupt();
+}
+
+void store_boot_time()
+{
+    cmos_get_datetime(&boot_time);
 }

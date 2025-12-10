@@ -110,7 +110,7 @@ OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 all: $(TARGET)
 
 run: $(ISO_TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -drive format=raw,file=disk.img,if=ide -boot d
 
 run_noaudio: $(TARGET)
 	@echo "Note: Using multiboot protocol. If this fails, try 'make run_cdrom' instead."

@@ -27,7 +27,7 @@ typedef struct {
     int32_t x_pels_per_meter;
     int32_t y_pels_per_meter;
     uint32_t colors_used;
-    uint32_t colors_important
+    uint32_t colors_important;
 } __attribute__((packed)) bmp_info_header_t;
 
 typedef struct {

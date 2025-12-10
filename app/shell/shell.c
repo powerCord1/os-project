@@ -17,20 +17,27 @@
 const char *shell_prompt = "> ";
 char input_buffer[512];
 
-const cmd_list_t cmds[] = {{"clear", &cmd_clear},
-                           {"exit", &cmd_exit},
-                           {"poweroff", &cmd_shutdown},
-                           {"reboot", &cmd_reboot},
-                           {"panic", &cmd_panic},
-                           {"echo", &cmd_echo},
-                           {"help", &cmd_help},
-                           {"date", &cmd_date},
-                           {"soundtest", &cmd_sound_test},
-                           {"history", &cmd_history},
-                           {"sysinfo", &cmd_sysinfo},
-                           {"fbtest", &cmd_fbtest},
-                           {"rgbtest", &cmd_rgbtest},
-                           {"memtest", &cmd_memtest}};
+const cmd_list_t cmds[] = {
+    {"clear", &cmd_clear},
+    {"exit", &cmd_exit},
+    {"poweroff", &cmd_shutdown},
+    {"reboot", &cmd_reboot},
+    {"panic", &cmd_panic},
+    {"echo", &cmd_echo},
+    {"help", &cmd_help},
+    {"date", &cmd_date},
+    {"soundtest", &cmd_sound_test},
+    {"history", &cmd_history},
+    {"sysinfo", &cmd_sysinfo},
+    {"fbtest", &cmd_fbtest},
+    {"rgbtest", &cmd_rgbtest},
+    {"memtest", &cmd_memtest},
+    {"lsblk", &cmd_lsblk},
+    {"mount", &cmd_mount},
+    {"umount", &cmd_umount},
+    {"ls", &cmd_ls},
+    {"cat", &cmd_cat},
+};
 uint8_t cmd_count;
 bool exit;
 char *command_history[MAX_HISTORY];

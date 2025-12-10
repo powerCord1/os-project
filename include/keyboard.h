@@ -4,6 +4,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define KBD_DATA_PORT 0x60
+#define KBD_STATUS_PORT 0x64
+#define KBD_CMD_PORT 0x64
+
+#define KBD_LED_CMD 0xED
+
+#define KBD_DEFAULT_TYPM_RATE 0
+#define KBD_DEFAULT_TYPM_DELAY 0
+
+#define KBD_LOG_DEFAULT false
+
 typedef struct {
     bool ctrl;
     bool alt;
@@ -19,6 +30,7 @@ typedef struct {
 } key_t;
 
 extern kbd_modifiers_t kbd_modifiers;
+extern bool keyboard_logging_enabled;
 
 uint8_t get_key();
 void keyboard_handler();

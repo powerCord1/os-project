@@ -1,8 +1,12 @@
 #include <stdbool.h>
 
+#include <ata.h>
 #include <cmos.h>
 #include <cpu.h>
+#include <debug.h>
 #include <framebuffer.h>
+#include <fs.h>
+#include <heap.h>
 #include <panic.h>
 #include <power.h>
 #include <shell.h>
@@ -67,8 +71,7 @@ void cmd_date(int argc, char **argv)
 
     if (daylight_savings_enabled) {
         datetime.hour = (datetime.hour + 1) % 24;
-        // Note: This is a simplified implementation. A full implementation
-        // would also handle date changes when the time crosses midnight.
+        // TODO: handle date changes when the time crosses midnight.
     }
 
     printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month,
@@ -161,4 +164,196 @@ void cmd_memtest(int argc, char **argv)
     memmove(memmove_buf + 2, memmove_buf, 5); // overlapping
     printf("memmove (overlap): %s\n",
            strcmp(memmove_buf, "121234589") == 0 ? "PASS" : "FAIL");
+}
+
+void cmd_lsblk(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    printf("Disks and Partitions:\n");
+    for (uint8_t drive = 0; drive < 4; drive++) {
+        if (ata_is_drive_present(drive)) {
+            printf("Drive %d:\n", drive);
+            partition_entry_t partitions[4];
+            ata_read_partition_table(drive, partitions);
+
+            for (int i = 0; i < 4; i++) {
+                if (partitions[i].num_sectors > 0) {
+                    printf("  Partition %d: Type 0x%x, LBA 0x%x, Sectors %u\n",
+                           i, partitions[i].type, partitions[i].lba_start,
+                           partitions[i].num_sectors);
+                } else {
+                    log_warn("partitions[%d].num_sectors == 0", i);
+                }
+            }
+        }
+    }
+}
+
+void cmd_mount(int argc, char **argv)
+{
+    if (argc != 3) {
+        printf("Usage: mount <drive> <partition>\n");
+        return;
+    }
+
+    if (mounted_fs) {
+        printf("A filesystem is already mounted. Unmount first.\n");
+        return;
+    }
+
+    uint8_t drive = atoi(argv[1]);
+    uint8_t part_num = atoi(argv[2]);
+
+    log_verbose("mount: drive: %d, part_num: %d", drive, part_num);
+
+    if (drive >= 4 || !ata_is_drive_present(drive)) {
+        printf("Invalid or non-existent drive.\n");
+        return;
+    }
+
+    partition_entry_t partitions[4];
+    ata_read_partition_table(drive, partitions);
+
+    if (part_num >= 4 || partitions[part_num].num_sectors == 0) {
+        printf("Invalid or non-existent partition.\n");
+        return;
+    }
+
+    partition_entry_t *p = &partitions[part_num];
+    if (fat32_mount(drive, p->lba_start, p->num_sectors)) {
+        printf("Successfully mounted partition %d on drive %d.\n", part_num,
+               drive);
+    } else {
+        printf("Failed to mount partition.\n");
+    }
+}
+
+void cmd_umount(int argc, char **argv)
+{
+    if (argc != 1) {
+        printf("Usage: umount\n");
+        return;
+    }
+
+    if (fat32_unmount()) {
+        printf("Filesystem unmounted successfully.\n");
+    } else {
+        printf("No filesystem to unmount.\n");
+    }
+}
+
+void cmd_ls(int argc, char **argv)
+{
+    if (argc > 2) {
+        printf("Usage: ls [directory]\n");
+        return;
+    }
+
+    fat32_fs_t *mounted_fs;
+    if (!(mounted_fs = fat32_get_mounted_fs())) {
+        printf("No filesystem mounted. Use 'mount' first.\n");
+        return;
+    }
+    uint32_t target_cluster = mounted_fs->root_cluster;
+    if (argc == 2) {
+        if (strcmp(argv[1], "/") != 0) {
+            fat32_dir_entry_t *dir_entry =
+                fat32_find_file(mounted_fs->root_cluster, argv[1]);
+            if (!dir_entry) {
+                printf("Directory not found: %s\n", argv[1]);
+                return;
+            }
+            if (!(dir_entry->attributes & FAT32_ATTRIBUTE_DIRECTORY)) {
+                printf("%s is not a directory.\n", argv[1]);
+                free(dir_entry);
+                return;
+            }
+            target_cluster = (dir_entry->first_cluster_high << 16) |
+                             dir_entry->first_cluster_low;
+            free(dir_entry);
+        }
+    }
+
+    int dir_count = 0;
+    char **dir_entries = fat32_list_directory(target_cluster, &dir_count);
+
+    if (dir_entries) {
+        for (int i = 0; i < dir_count; i++) {
+            printf("%s\n", dir_entries[i]);
+            free(dir_entries[i]);
+        }
+        free(dir_entries);
+    }
+}
+
+void cmd_cat(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("Usage: cat <filename>\n");
+        return;
+    }
+
+    if (!fat32_is_mounted()) {
+        printf("No filesystem mounted. Use 'mount' first.\n");
+        return;
+    }
+
+    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
+    fat32_dir_entry_t *file_entry =
+        fat32_find_file(mounted_fs->root_cluster, argv[1]);
+
+    if (!file_entry) {
+        printf("File not found: %s\n", argv[1]);
+        return;
+    }
+
+    if (file_entry->attributes & FAT32_ATTRIBUTE_DIRECTORY) {
+        printf("%s is a directory.\n", argv[1]);
+        free(file_entry);
+        return;
+    }
+
+    uint32_t current_cluster =
+        (file_entry->first_cluster_high << 16) | file_entry->first_cluster_low;
+    uint32_t file_size = file_entry->file_size;
+    uint32_t bytes_read = 0;
+
+    uint8_t *cluster_buffer = (uint8_t *)malloc(
+        mounted_fs->bytes_per_sector * mounted_fs->sectors_per_cluster);
+    if (!cluster_buffer) {
+        printf("Failed to allocate buffer for file content.\n");
+        free(file_entry);
+        return;
+    }
+
+    while (current_cluster >= 2 && (current_cluster & 0x0FFFFFFF) < 0x0FFFFF8 &&
+           bytes_read < file_size) {
+        uint32_t cluster_lba = fat32_get_cluster_lba(current_cluster);
+        if (!ata_read_sectors(mounted_fs->drive, cluster_lba,
+                              mounted_fs->sectors_per_cluster,
+                              cluster_buffer)) {
+            log_err("Failed to read cluster %d for file content",
+                    current_cluster);
+            break;
+        }
+
+        uint32_t bytes_to_read_from_cluster =
+            mounted_fs->bytes_per_sector * mounted_fs->sectors_per_cluster;
+        if ((bytes_read + bytes_to_read_from_cluster) > file_size) {
+            bytes_to_read_from_cluster = file_size - bytes_read;
+        }
+
+        for (uint32_t i = 0; i < bytes_to_read_from_cluster; i++) {
+            putchar(cluster_buffer[i]);
+        }
+        bytes_read += bytes_to_read_from_cluster;
+
+        current_cluster = fat32_get_next_cluster(current_cluster);
+    }
+    putchar('\n');
+
+    free(cluster_buffer);
+    free(file_entry);
 }

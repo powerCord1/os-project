@@ -35,8 +35,6 @@ void main(unsigned long magic, unsigned long addr)
         }
     }
 
-    enable_interrupts();
-
     log_verbose("Init done, entering main menu...");
     while (1) {
         main_menu();

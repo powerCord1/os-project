@@ -112,6 +112,24 @@ char *strpbrk(const char *str, const char *accept)
     return NULL;
 }
 
+static inline int tolower(int c)
+{
+    if (c >= 'A' && c <= 'Z') {
+        return c - 'A' + 'a';
+    }
+    return c;
+}
+
+int strcasecmp(const char *s1, const char *s2)
+{
+    while (*s1 && (tolower(*s1) == tolower(*s2))) {
+        s1++;
+        s2++;
+    }
+    return tolower(*(const unsigned char *)s1) -
+           tolower(*(const unsigned char *)s2);
+}
+
 int strcmp(const char *s1, const char *s2)
 {
     while (*s1 && (*s1 == *s2)) {
@@ -218,4 +236,32 @@ char *strdup(const char *s)
         return NULL;
     }
     return strcpy(new_s, s);
+}
+
+int atoi(const char *str)
+{
+    int res = 0;
+    int sign = 1;
+    int i = 0;
+
+    // Skip whitespace
+    while (str[i] == ' ' || str[i] == '\t' || str[i] == '\n') {
+        i++;
+    }
+
+    // Handle sign
+    if (str[i] == '-') {
+        sign = -1;
+        i++;
+    } else if (str[i] == '+') {
+        i++;
+    }
+
+    // Convert digits
+    while (str[i] >= '0' && str[i] <= '9') {
+        res = res * 10 + (str[i] - '0');
+        i++;
+    }
+
+    return res * sign;
 }

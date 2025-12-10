@@ -3,6 +3,7 @@
 
 #include <heap.h>
 #include <stddef.h>
+#include <string.h>
 
 #define HEAP_SIZE 1024 * 1024 // 1 MB
 
@@ -14,18 +15,18 @@ typedef struct block {
     struct block *next;
 } block_t;
 
-static block_t *free_list = (void *)heap;
+static block_t *heap_start = (void *)heap;
 
 void heap_init()
 {
-    free_list->size = HEAP_SIZE - sizeof(block_t);
-    free_list->free = true;
-    free_list->next = NULL;
+    heap_start->size = HEAP_SIZE - sizeof(block_t);
+    heap_start->free = true;
+    heap_start->next = NULL;
 }
 
 void *malloc(size_t size)
 {
-    block_t *curr = free_list;
+    block_t *curr = heap_start;
 
     while (curr) {
         if (curr->free && curr->size >= size) {
@@ -64,4 +65,32 @@ void free(void *ptr)
 
         block_to_free->next = block_to_free->next->next;
     }
+}
+
+void *realloc(void *ptr, size_t size)
+{
+    if (!ptr) {
+        return malloc(size);
+    }
+
+    block_t *block = (block_t *)((uint8_t *)ptr - sizeof(block_t));
+
+    if (size == 0) {
+        free(ptr);
+        return NULL;
+    }
+
+    if (block->size >= size) {
+        // enough space is available, can return original pointer
+        return ptr;
+    }
+
+    void *new_ptr = malloc(size);
+    if (!new_ptr) {
+        return NULL;
+    }
+
+    memcpy(new_ptr, ptr, block->size);
+    free(ptr);
+    return new_ptr;
 }

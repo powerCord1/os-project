@@ -6,6 +6,7 @@
 #include <font.h>
 #include <framebuffer.h>
 #include <image.h>
+#include <keyboard.h>
 #include <limine.h>
 #include <limine_defs.h>
 #include <math.h>
@@ -308,7 +309,7 @@ void fb_backspace()
 
     if (!fb_is_region_empty(cursor.x + char_width, cursor.y, fb->width,
                             cursor.y + char_height)) {
-        log_debug("shifting characters left");
+        log_kbd_action("shifting characters left");
         for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
             memmove(&fb_ptr[y * pitch_in_pixels + cursor.x],
                     &fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
@@ -534,7 +535,7 @@ void fb_putchar(char c)
             cursor.x, cursor.y, cursor.x + char_width, // is there a character
             cursor.y + char_height)) { // in front of the cursor? this is ugly,
                                        // make a text buffer at some point
-        log_debug("shifting characters right");
+        log_kbd_action("shifting characters right");
         for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
             memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
                     &fb_ptr[y * pitch_in_pixels + cursor.x],

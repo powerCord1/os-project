@@ -10,23 +10,19 @@
 #include <pit.h>
 #include <power.h>
 
-#define KBD_DATA_PORT 0x60
-#define KBD_STATUS_PORT 0x64
-#define KBD_CMD_PORT 0x64
-
-#define KBD_LED_CMD 0xED
-
-#define KBD_DEFAULT_TYPM_RATE 0
-#define KBD_DEFAULT_TYPM_DELAY 0
-
 static volatile char last_char = 0;
 static volatile char last_scancode = 0;
 
 kbd_modifiers_t kbd_modifiers = {false, false, false, false, false, false};
+bool keyboard_logging_enabled;
+
 key_t last_key = {0, 0};
 
 void kbd_init()
 {
+    keyboard_logging_enabled = KBD_LOG_DEFAULT;
+    log_verbose("Keyboard logging is %s",
+                keyboard_logging_enabled ? "enabled" : "disabled");
     log_verbose("Setting keyboard LED state");
     kbd_set_leds();
     log_verbose("Setting typematic rate, rate: %d, delay: %d",
@@ -123,7 +119,7 @@ void keyboard_handler()
 
         last_scancode = key;
 
-        log_debug("key pressed: 0x%x", key);
+        log_kbd_action("key pressed: 0x%x", key);
 
         switch (key) {
         case KEY_F1:

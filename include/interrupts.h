@@ -4,6 +4,7 @@ void idt_init();
 void enable_interrupts();
 void disable_interrupts();
 bool are_interrupts_enabled();
+void wait_for_interrupt();
 
 enum irq_types {
     IRQ_TYPE_PIT = 0,

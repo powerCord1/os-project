@@ -6,6 +6,7 @@
 #include <debug.h>
 #include <gdt.h>
 #include <idt.h>
+#include <init.h>
 #include <interrupts.h>
 #include <io.h>
 #include <isr.h>
@@ -139,4 +140,11 @@ void idt_init()
 void idt_load()
 {
     __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
+}
+
+void wait_for_interrupt()
+{
+    while (pit_ticks == 0) {
+        // TODO: panic after 2 seconds of no interrupts
+    }
 }

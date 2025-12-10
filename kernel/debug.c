@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <debug.h>
+#include <keyboard.h>
 #include <serial.h>
 #include <stdio.h>
 #include <tty.h>
@@ -34,16 +35,6 @@ const char *get_log_text(uint8_t type)
     default:
         return "UNKNOWN LOGLEVEL";
     }
-}
-
-void log_debug(const char *format, ...)
-{
-#if DEBUG
-    va_list args;
-    va_start(args, format);
-    write_log(LOGLEVEL_INFO, ansi_color.purple, format, args);
-    va_end(args);
-#endif
 }
 
 void log_verbose(const char *format, ...)
@@ -90,4 +81,14 @@ void log_test()
 void breakpoint()
 {
     __asm__ volatile("1: jmp 1b");
+}
+
+void log_kbd_action(const char *format, ...)
+{
+    if (keyboard_logging_enabled) {
+        va_list args;
+        va_start(args, format);
+        write_log(LOGLEVEL_VERBOSE, ansi_color.light_blue, format, args);
+        va_end(args);
+    }
 }

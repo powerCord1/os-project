@@ -72,5 +72,5 @@ void sys_poweroff()
 
 void wait_for_render()
 {
-    pit_wait_ms(50);
+    pit_wait_ms(100);
 }
