@@ -95,3 +95,5 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
                       const char *filename, const uint8_t *data, uint32_t size);
 bool fat32_delete_file(uint32_t cluster, const char *filename);
 char *fat32_read_file(uint32_t cluster, const char *filename);
+bool fat32_create_directory(uint32_t cluster, const char *dirname);
+bool fat32_delete_directory(uint32_t cluster, const char *dirname);

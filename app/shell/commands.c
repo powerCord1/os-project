@@ -362,3 +362,51 @@ void cmd_rm(int argc, char **argv)
         printf("Failed to delete file '%s'.\n", filename);
     }
 }
+
+void cmd_mkdir(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("Usage: mkdir <dirname>\n");
+        return;
+    }
+
+    if (!fat32_is_mounted()) {
+        printf("No filesystem mounted. Use 'mount' first.\n");
+        return;
+    }
+
+    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
+    const char *dirname = argv[1];
+
+    uint32_t parent_cluster = mounted_fs->root_cluster;
+
+    if (fat32_create_directory(parent_cluster, dirname)) {
+        printf("Directory '%s' created successfully.\n", dirname);
+    } else {
+        printf("Failed to create directory '%s'.\n", dirname);
+    }
+}
+
+void cmd_rmdir(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("Usage: rmdir <dirname>\n");
+        return;
+    }
+
+    if (!fat32_is_mounted()) {
+        printf("No filesystem mounted. Use 'mount' first.\n");
+        return;
+    }
+
+    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
+    const char *dirname = argv[1];
+
+    uint32_t parent_cluster = mounted_fs->root_cluster;
+
+    if (fat32_delete_directory(parent_cluster, dirname)) {
+        printf("Directory '%s' deleted successfully.\n", dirname);
+    } else {
+        printf("Failed to delete directory '%s'.\n", dirname);
+    }
+}

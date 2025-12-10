@@ -36,7 +36,6 @@ void typewriter_main()
             }
 
             bool is_alpha = (c >= 'a' && c <= 'z');
-
             printf("%c", c);
             continue;
         }

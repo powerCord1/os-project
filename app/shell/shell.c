@@ -39,6 +39,8 @@ const cmd_list_t cmds[] = {
     {"cat", &cmd_cat},
     {"write", &cmd_write},
     {"rm", &cmd_rm},
+    {"mkdir", &cmd_mkdir},
+    {"rmdir", &cmd_rmdir},
 };
 uint8_t cmd_count;
 bool exit;

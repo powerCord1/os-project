@@ -479,7 +479,7 @@ found_empty_entry:
                 break;
             }
         }
-        ext_is_lower = false; // No extension
+        ext_is_lower = false; // no extension
     }
     memcpy(new_entry->filename, name_8_3, 8);
     memcpy(new_entry->ext, name_8_3 + 8, 3);
@@ -578,7 +578,7 @@ found_empty_entry:
         current_data_cluster = fat32_get_next_cluster(current_data_cluster);
     }
 
-    // write the updated directory entry back to disk
+    // write to disk
     uint32_t sector_offset_in_cluster =
         (new_entry_lba - fat32_get_cluster_lba(current_cluster)) *
         fs->bytes_per_sector;
@@ -653,10 +653,10 @@ end_search:
     return false;
 
 found_entry_to_delete:
-    // Mark the directory entry as deleted
+    // mark as deleted
     entry_to_delete->filename[0] = 0xE5;
 
-    // Write the updated directory entry back to disk
+    // write to disk
     uint32_t sector_offset_in_cluster =
         (entry_lba - fat32_get_cluster_lba(current_cluster)) *
         fs->bytes_per_sector;
@@ -667,7 +667,7 @@ found_entry_to_delete:
         return false;
     }
 
-    // Free the clusters associated with the file
+    // free clusters associated with the file
     uint32_t first_data_cluster = (entry_to_delete->first_cluster_high << 16) |
                                   entry_to_delete->first_cluster_low;
     uint32_t data_cluster_to_free = first_data_cluster;
@@ -675,7 +675,7 @@ found_entry_to_delete:
            (data_cluster_to_free & 0x0FFFFFFF) < 0x0FFFFF8) {
         uint32_t next_data_cluster =
             fat32_get_next_cluster(data_cluster_to_free);
-        fat32_set_next_cluster(fs, data_cluster_to_free, 0); // Mark as free
+        fat32_set_next_cluster(fs, data_cluster_to_free, 0); // mark free
         data_cluster_to_free = next_data_cluster;
     }
 
@@ -748,9 +748,296 @@ char *fat32_read_file(uint32_t cluster, const char *filename)
         current_data_cluster = fat32_get_next_cluster(current_data_cluster);
     }
 
-    file_content[file_size] = '\0'; // Null-terminate the string
+    file_content[file_size] = '\0';
     free(file_entry);
     free(cluster_data_buffer);
     log_info("FAT32: Successfully read file '%s'.", filename);
     return file_content;
+}
+
+bool fat32_create_directory(uint32_t cluster, const char *dirname)
+
+{
+    log_info("FAT32: Creating directory '%s' in cluster %d", dirname, cluster);
+
+    uint8_t *cluster_data =
+        (uint8_t *)malloc(fs->bytes_per_sector * fs->sectors_per_cluster);
+    if (!cluster_data) {
+        log_err("Failed to allocate memory for cluster data");
+        return false;
+    }
+
+    uint32_t current_cluster = cluster;
+    fat32_dir_entry_t *new_entry = NULL;
+    uint32_t new_entry_lba = 0;
+    uint32_t new_entry_offset_in_sector = 0;
+
+    while (current_cluster >= 2 && (current_cluster & 0x0FFFFFFF) < 0x0FFFFF8) {
+        uint32_t cluster_lba = fat32_get_cluster_lba(current_cluster);
+        if (!ata_read_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
+                              cluster_data)) {
+            log_err("Failed to read cluster %d at LBA 0x%x", current_cluster,
+                    cluster_lba);
+            free(cluster_data);
+            return false;
+        }
+
+        fat32_dir_entry_t *entry = (fat32_dir_entry_t *)cluster_data;
+        for (uint32_t i = 0;
+             i < (fs->bytes_per_sector * fs->sectors_per_cluster) /
+                     sizeof(fat32_dir_entry_t);
+             i++) {
+            if (entry[i].filename[0] == 0x00 ||
+                entry[i].filename[0] == 0xE5) { // empty or deleted entry
+                new_entry = &entry[i];
+                new_entry_lba = cluster_lba + (i * sizeof(fat32_dir_entry_t)) /
+                                                  fs->bytes_per_sector;
+                new_entry_offset_in_sector =
+                    (i * sizeof(fat32_dir_entry_t)) % fs->bytes_per_sector;
+                goto found_empty_entry_for_dir;
+            }
+        }
+        current_cluster = fat32_get_next_cluster(current_cluster);
+    }
+
+    log_err("FAT32: No empty directory entry found for new directory.");
+    free(cluster_data);
+    return false;
+
+found_empty_entry_for_dir:
+    // allocate new cluster for directory's data
+    uint32_t new_dir_cluster = fat32_find_free_cluster(fs);
+    if (new_dir_cluster == 0) {
+        log_err("FAT32: No free clusters available for new directory.");
+        free(cluster_data);
+        return false;
+    }
+    fat32_set_next_cluster(fs, new_dir_cluster, 0x0FFFFFFF); // EOF
+
+    memset(new_entry, 0, sizeof(fat32_dir_entry_t));
+
+    // format directory name to 8.3
+    char name_8_3[12];
+    memset(name_8_3, ' ', 11);
+    name_8_3[11] = '\0';
+    new_entry->nt_res = 0;
+    bool base_is_lower = true;
+    for (int i = 0; i < 8 && dirname[i] != '\0'; i++) {
+        name_8_3[i] = toupper(dirname[i]);
+        if (dirname[i] != tolower(dirname[i])) {
+            base_is_lower = false;
+        }
+    }
+    memcpy(new_entry->filename, name_8_3, 8);
+    memcpy(new_entry->ext, name_8_3 + 8, 3);
+
+    datetime_t datetime;
+    cmos_get_datetime(&datetime);
+
+    if (base_is_lower) {
+        new_entry->nt_res |= NT_RES_LOWER_CASE_BASE;
+    }
+
+    new_entry->attributes = FAT32_ATTRIBUTE_DIRECTORY;
+    new_entry->create_time_tenth = 0;
+    new_entry->create_time =
+        (datetime.hour << 11) | (datetime.minute << 5) | (datetime.second / 2);
+    new_entry->create_date =
+        ((datetime.year - 1980) << 9) | (datetime.month << 5) | datetime.day;
+    new_entry->last_access_date = 0;
+    new_entry->write_time =
+        (datetime.hour << 11) | (datetime.minute << 5) | (datetime.second / 2);
+    new_entry->write_date =
+        ((datetime.year - 1980) << 9) | (datetime.month << 5) | datetime.day;
+    new_entry->first_cluster_low = (uint16_t)(new_dir_cluster & 0xFFFF);
+    new_entry->first_cluster_high =
+        (uint16_t)((new_dir_cluster >> 16) & 0xFFFF);
+    new_entry->file_size = 0;
+
+    // write the updated directory entry back to disk
+    uint32_t sector_offset_in_cluster =
+        (new_entry_lba - fat32_get_cluster_lba(current_cluster)) *
+        fs->bytes_per_sector;
+    if (!ata_write_sectors(fs->drive, new_entry_lba, 1,
+                           cluster_data + sector_offset_in_cluster)) {
+        log_err("Failed to write directory entry for '%s'", dirname);
+        free(cluster_data);
+        return false;
+    }
+
+    // initialize the new directory's cluster with '.' and '..' entries
+    uint8_t *new_dir_cluster_data =
+        (uint8_t *)malloc(fs->bytes_per_sector * fs->sectors_per_cluster);
+    if (!new_dir_cluster_data) {
+        log_err("Failed to allocate memory for new directory cluster data");
+        free(cluster_data);
+        return false;
+    }
+    memset(new_dir_cluster_data, 0,
+           fs->bytes_per_sector * fs->sectors_per_cluster);
+
+    fat32_dir_entry_t *dot_entry = (fat32_dir_entry_t *)new_dir_cluster_data;
+    fat32_dir_entry_t *dot_dot_entry =
+        (fat32_dir_entry_t *)(new_dir_cluster_data + sizeof(fat32_dir_entry_t));
+
+    // create '.' entry
+    memset(dot_entry, 0, sizeof(fat32_dir_entry_t));
+    memcpy(dot_entry->filename, ".          ", 11);
+    dot_entry->attributes = FAT32_ATTRIBUTE_DIRECTORY;
+    dot_entry->create_time_tenth = new_entry->create_time_tenth;
+    dot_entry->create_time = new_entry->create_time;
+    dot_entry->create_date = new_entry->create_date;
+    dot_entry->last_access_date = new_entry->last_access_date;
+    dot_entry->write_time = new_entry->write_time;
+    dot_entry->write_date = new_entry->write_date;
+    dot_entry->first_cluster_low = (uint16_t)(new_dir_cluster & 0xFFFF);
+    dot_entry->first_cluster_high =
+        (uint16_t)((new_dir_cluster >> 16) & 0xFFFF);
+    dot_entry->file_size = 0;
+
+    // create '..' entry
+    memset(dot_dot_entry, 0, sizeof(fat32_dir_entry_t));
+    memcpy(dot_dot_entry->filename, "..         ", 11);
+    dot_dot_entry->attributes = FAT32_ATTRIBUTE_DIRECTORY;
+    dot_dot_entry->create_time_tenth = new_entry->create_time_tenth;
+    dot_dot_entry->create_time = new_entry->create_time;
+    dot_dot_entry->create_date = new_entry->create_date;
+    dot_dot_entry->last_access_date = new_entry->last_access_date;
+    dot_dot_entry->write_time = new_entry->write_time;
+    dot_dot_entry->write_date = new_entry->write_date;
+    dot_dot_entry->first_cluster_low = (uint16_t)(cluster & 0xFFFF);
+    dot_dot_entry->first_cluster_high = (uint16_t)((cluster >> 16) & 0xFFFF);
+    dot_dot_entry->file_size = 0;
+
+    if (!ata_write_sectors(fs->drive, fat32_get_cluster_lba(new_dir_cluster),
+                           fs->sectors_per_cluster, new_dir_cluster_data)) {
+        log_err("Failed to write initial directory entries for '%s'", dirname);
+        free(cluster_data);
+        free(new_dir_cluster_data);
+        return false;
+    }
+
+    free(cluster_data);
+    free(new_dir_cluster_data);
+    log_info("FAT32: Directory '%s' created successfully.", dirname);
+    return true;
+}
+
+bool fat32_delete_directory(uint32_t cluster, const char *dirname)
+{
+    log_info("FAT32: Deleting directory '%s' from cluster %d", dirname,
+             cluster);
+
+    uint8_t *cluster_data =
+        (uint8_t *)malloc(fs->bytes_per_sector * fs->sectors_per_cluster);
+    if (!cluster_data) {
+        log_err("Failed to allocate memory for cluster data");
+        return false;
+    }
+
+    uint32_t current_cluster = cluster;
+    fat32_dir_entry_t *entry_to_delete = NULL;
+    uint32_t entry_lba = 0;
+    uint32_t entry_offset_in_sector = 0;
+    uint32_t dir_cluster_to_free = 0;
+
+    while (current_cluster >= 2 && (current_cluster & 0x0FFFFFFF) < 0x0FFFFF8) {
+        uint32_t cluster_lba = fat32_get_cluster_lba(current_cluster);
+        if (!ata_read_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
+                              cluster_data)) {
+            log_err("Failed to read cluster %d at LBA 0x%x", current_cluster,
+                    cluster_lba);
+            break;
+        }
+
+        fat32_dir_entry_t *entry = (fat32_dir_entry_t *)cluster_data;
+        for (uint32_t i = 0;
+             i < (fs->bytes_per_sector * fs->sectors_per_cluster) /
+                     sizeof(fat32_dir_entry_t);
+             i++) {
+            if (entry[i].filename[0] == 0x00) { // end of directory
+                goto end_search;
+            }
+            if (entry[i].filename[0] == 0xE5) { // deleted entry
+                continue;
+            }
+            if (entry[i].attributes & FAT32_ATTRIBUTE_LONG_FILE_NAME) {
+                continue; // skip LFN entries for now
+            }
+
+            char entry_filename[13];
+            fat32_format_filename(&entry[i], entry_filename, sizeof(entry[i]));
+
+            if (strcasecmp(entry_filename, dirname) == 0) {
+                if (!(entry[i].attributes & FAT32_ATTRIBUTE_DIRECTORY)) {
+                    log_warn("FAT32: '%s' is not a directory.", dirname);
+                    free(cluster_data);
+                    return false;
+                }
+                entry_to_delete = &entry[i];
+                entry_lba = cluster_lba + (i * sizeof(fat32_dir_entry_t)) /
+                                              fs->bytes_per_sector;
+                entry_offset_in_sector =
+                    (i * sizeof(fat32_dir_entry_t)) % fs->bytes_per_sector;
+                dir_cluster_to_free = (entry[i].first_cluster_high << 16) |
+                                      entry[i].first_cluster_low;
+                goto found_entry_to_delete;
+            }
+        }
+        current_cluster = fat32_get_next_cluster(current_cluster);
+    }
+end_search:
+    free(cluster_data);
+    log_warn("FAT32: Directory '%s' not found for deletion.", dirname);
+    return false;
+
+found_entry_to_delete:
+    // check if directory is empty (except for . and ..)
+    int dir_entry_count = 0;
+    char **dir_contents =
+        fat32_list_directory(dir_cluster_to_free, &dir_entry_count);
+    if (dir_contents) {
+        // . and .. are always present, so if count > 2, it's not empty
+        if (dir_entry_count > 2) {
+            log_warn("FAT32: Directory '%s' is not empty.", dirname);
+            for (int k = 0; k < dir_entry_count; k++) {
+                free(dir_contents[k]);
+            }
+            free(dir_contents);
+            free(cluster_data);
+            return false;
+        }
+        for (int k = 0; k < dir_entry_count; k++) {
+            free(dir_contents[k]);
+        }
+        free(dir_contents);
+    }
+
+    // mark as deleted
+    entry_to_delete->filename[0] = 0xE5;
+
+    // write to disk
+    uint32_t sector_offset_in_cluster =
+        (entry_lba - fat32_get_cluster_lba(current_cluster)) *
+        fs->bytes_per_sector;
+    if (!ata_write_sectors(fs->drive, entry_lba, 1,
+                           cluster_data + sector_offset_in_cluster)) {
+        log_err("Failed to write updated directory entry for '%s'", dirname);
+        free(cluster_data);
+        return false;
+    }
+
+    // free clusters
+    uint32_t data_cluster_to_free = dir_cluster_to_free;
+    while (data_cluster_to_free >= 2 &&
+           (data_cluster_to_free & 0x0FFFFFFF) < 0x0FFFFF8) {
+        uint32_t next_data_cluster =
+            fat32_get_next_cluster(data_cluster_to_free);
+        fat32_set_next_cluster(fs, data_cluster_to_free, 0); // mark as free
+        data_cluster_to_free = next_data_cluster;
+    }
+
+    free(cluster_data);
+    log_info("FAT32: Directory '%s' deleted successfully.", dirname);
+    return true;
 }
