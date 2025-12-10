@@ -300,62 +300,14 @@ void cmd_cat(int argc, char **argv)
         return;
     }
 
-    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
-    fat32_dir_entry_t *file_entry =
-        fat32_find_file(mounted_fs->root_cluster, argv[1]);
-
-    if (!file_entry) {
-        printf("File not found: %s\n", argv[1]);
-        return;
+    char *file_content =
+        fat32_read_file(fat32_get_mounted_fs()->root_cluster, argv[1]);
+    if (file_content) {
+        printf("%s\n", file_content);
+        free(file_content);
+    } else {
+        printf("Failed to read file '%s'.\n", argv[1]);
     }
-
-    if (file_entry->attributes & FAT32_ATTRIBUTE_DIRECTORY) {
-        printf("%s is a directory.\n", argv[1]);
-        free(file_entry);
-        return;
-    }
-
-    uint32_t current_cluster =
-        (file_entry->first_cluster_high << 16) | file_entry->first_cluster_low;
-    uint32_t file_size = file_entry->file_size;
-    uint32_t bytes_read = 0;
-
-    uint8_t *cluster_buffer = (uint8_t *)malloc(
-        mounted_fs->bytes_per_sector * mounted_fs->sectors_per_cluster);
-    if (!cluster_buffer) {
-        printf("Failed to allocate buffer for file content.\n");
-        free(file_entry);
-        return;
-    }
-
-    while (current_cluster >= 2 && (current_cluster & 0x0FFFFFFF) < 0x0FFFFF8 &&
-           bytes_read < file_size) {
-        uint32_t cluster_lba = fat32_get_cluster_lba(current_cluster);
-        if (!ata_read_sectors(mounted_fs->drive, cluster_lba,
-                              mounted_fs->sectors_per_cluster,
-                              cluster_buffer)) {
-            log_err("Failed to read cluster %d for file content",
-                    current_cluster);
-            break;
-        }
-
-        uint32_t bytes_to_read_from_cluster =
-            mounted_fs->bytes_per_sector * mounted_fs->sectors_per_cluster;
-        if ((bytes_read + bytes_to_read_from_cluster) > file_size) {
-            bytes_to_read_from_cluster = file_size - bytes_read;
-        }
-
-        for (uint32_t i = 0; i < bytes_to_read_from_cluster; i++) {
-            putchar(cluster_buffer[i]);
-        }
-        bytes_read += bytes_to_read_from_cluster;
-
-        current_cluster = fat32_get_next_cluster(current_cluster);
-    }
-    putchar('\n');
-
-    free(cluster_buffer);
-    free(file_entry);
 }
 
 void cmd_write(int argc, char **argv)

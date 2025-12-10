@@ -683,3 +683,74 @@ found_entry_to_delete:
     log_info("FAT32: File '%s' deleted successfully.", filename);
     return true;
 }
+
+char *fat32_read_file(uint32_t cluster, const char *filename)
+{
+    log_info("FAT32: Reading file '%s' from cluster %d", filename, cluster);
+
+    fat32_dir_entry_t *file_entry = fat32_find_file(cluster, filename);
+    if (!file_entry) {
+        log_warn("FAT32: File '%s' not found for reading.", filename);
+        return NULL;
+    }
+
+    if (file_entry->attributes & FAT32_ATTRIBUTE_DIRECTORY) {
+        log_warn("FAT32: '%s' is a directory, not a file.", filename);
+        free(file_entry);
+        return NULL;
+    }
+
+    uint32_t file_size = file_entry->file_size;
+    char *file_content =
+        (char *)malloc(file_size + 1); // +1 for null terminator
+    if (!file_content) {
+        log_err("Failed to allocate memory for file content.");
+        free(file_entry);
+        return NULL;
+    }
+
+    uint32_t current_data_cluster =
+        (file_entry->first_cluster_high << 16) | file_entry->first_cluster_low;
+    uint32_t bytes_read = 0;
+
+    uint8_t *cluster_data_buffer =
+        (uint8_t *)malloc(fs->bytes_per_sector * fs->sectors_per_cluster);
+    if (!cluster_data_buffer) {
+        log_err("Failed to allocate memory for cluster data buffer.");
+        free(file_entry);
+        free(file_content);
+        return NULL;
+    }
+
+    while (current_data_cluster >= 2 &&
+           (current_data_cluster & 0x0FFFFFFF) < 0x0FFFFF8 &&
+           bytes_read < file_size) {
+        uint32_t cluster_lba = fat32_get_cluster_lba(current_data_cluster);
+
+        if (!ata_read_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
+                              cluster_data_buffer)) {
+            log_err("Failed to read cluster %d for file data.",
+                    current_data_cluster);
+            free(file_entry);
+            free(file_content);
+            free(cluster_data_buffer);
+            return NULL;
+        }
+
+        uint32_t bytes_to_copy = fs->bytes_per_sector * fs->sectors_per_cluster;
+        if ((bytes_read + bytes_to_copy) > file_size) {
+            bytes_to_copy = file_size - bytes_read;
+        }
+
+        memcpy(file_content + bytes_read, cluster_data_buffer, bytes_to_copy);
+        bytes_read += bytes_to_copy;
+
+        current_data_cluster = fat32_get_next_cluster(current_data_cluster);
+    }
+
+    file_content[file_size] = '\0'; // Null-terminate the string
+    free(file_entry);
+    free(cluster_data_buffer);
+    log_info("FAT32: Successfully read file '%s'.", filename);
+    return file_content;
+}
