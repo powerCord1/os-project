@@ -258,11 +258,26 @@ void cmd_ls(int argc, char **argv)
     }
     uint32_t target_cluster = mounted_fs->root_cluster;
     if (argc == 2) {
-        if (strcmp(argv[1], "/") != 0) {
+        char *path = argv[1];
+        int len = strlen(path);
+
+        // trim trailing "/."
+        if (len > 2 && strcmp(path + len - 2, "/.") == 0) {
+            path[len - 2] = '\0';
+            len -= 2;
+        }
+
+        // trim trailing "/"
+        if (len > 1 && path[len - 1] == '/') {
+            path[len - 1] = '\0';
+        }
+
+        // if path is not empty, not just root, and not current dir '.'
+        if (len > 0 && strcmp(path, "/") != 0 && strcmp(path, ".") != 0) {
             fat32_dir_entry_t *dir_entry =
-                fat32_find_file(mounted_fs->root_cluster, argv[1]);
+                fat32_find_file(mounted_fs->root_cluster, path);
             if (!dir_entry) {
-                printf("Directory not found: %s\n", argv[1]);
+                printf("Directory not found: %s\n", path);
                 return;
             }
             if (!(dir_entry->attributes & FAT32_ATTRIBUTE_DIRECTORY)) {
