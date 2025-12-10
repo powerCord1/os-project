@@ -8,6 +8,9 @@
 #include <heap.h>
 #include <string.h>
 
+#define NT_RES_LOWER_CASE_BASE 0x08
+#define NT_RES_LOWER_CASE_EXT 0x10
+
 static fat32_fs_t *fs = NULL;
 
 bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors)
@@ -195,9 +198,6 @@ uint32_t fat32_find_free_cluster(fat32_fs_t *fs)
     log_warn("No free clusters found on FAT32 filesystem.");
     return 0;
 }
-
-#define NT_RES_LOWER_CASE_BASE 0x08
-#define NT_RES_LOWER_CASE_EXT 0x10
 
 void fat32_format_filename(const fat32_dir_entry_t *entry, char *buffer,
                            size_t buffer_size)
@@ -582,12 +582,104 @@ found_empty_entry:
     uint32_t sector_offset_in_cluster =
         (new_entry_lba - fat32_get_cluster_lba(current_cluster)) *
         fs->bytes_per_sector;
-    if (!ata_write_sectors(fs->drive, new_entry_lba, 1, cluster_data + sector_offset_in_cluster)) {
+    if (!ata_write_sectors(fs->drive, new_entry_lba, 1,
+                           cluster_data + sector_offset_in_cluster)) {
         log_err("Failed to write directory entry for '%s'", filename);
         free(cluster_data);
         return false;
     }
 
     free(cluster_data);
+    return true;
+}
+
+bool fat32_delete_file(uint32_t cluster, const char *filename)
+{
+    log_info("FAT32: Deleting file '%s' from cluster %d", filename, cluster);
+
+    uint8_t *cluster_data =
+        (uint8_t *)malloc(fs->bytes_per_sector * fs->sectors_per_cluster);
+    if (!cluster_data) {
+        log_err("Failed to allocate memory for cluster data");
+        return false;
+    }
+
+    uint32_t current_cluster = cluster;
+    fat32_dir_entry_t *entry_to_delete = NULL;
+    uint32_t entry_lba = 0;
+    uint32_t entry_offset_in_sector = 0;
+
+    while (current_cluster >= 2 && (current_cluster & 0x0FFFFFFF) < 0x0FFFFF8) {
+        uint32_t cluster_lba = fat32_get_cluster_lba(current_cluster);
+        if (!ata_read_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
+                              cluster_data)) {
+            log_err("Failed to read cluster %d at LBA 0x%x", current_cluster,
+                    cluster_lba);
+            break;
+        }
+
+        fat32_dir_entry_t *entry = (fat32_dir_entry_t *)cluster_data;
+        for (uint32_t i = 0;
+             i < (fs->bytes_per_sector * fs->sectors_per_cluster) /
+                     sizeof(fat32_dir_entry_t);
+             i++) {
+            if (entry[i].filename[0] == 0x00) { // end of directory
+                goto end_search;
+            }
+            if (entry[i].filename[0] == 0xE5) { // deleted entry
+                continue;
+            }
+            if (entry[i].attributes & FAT32_ATTRIBUTE_LONG_FILE_NAME) {
+                continue; // skip LFN entries for now
+            }
+
+            char entry_filename[13];
+            fat32_format_filename(&entry[i], entry_filename, sizeof(entry[i]));
+
+            if (strcasecmp(entry_filename, filename) == 0) {
+                entry_to_delete = &entry[i];
+                entry_lba = cluster_lba + (i * sizeof(fat32_dir_entry_t)) /
+                                              fs->bytes_per_sector;
+                entry_offset_in_sector =
+                    (i * sizeof(fat32_dir_entry_t)) % fs->bytes_per_sector;
+                goto found_entry_to_delete;
+            }
+        }
+        current_cluster = fat32_get_next_cluster(current_cluster);
+    }
+end_search:
+    free(cluster_data);
+    log_warn("FAT32: File '%s' not found for deletion.", filename);
+    return false;
+
+found_entry_to_delete:
+    // Mark the directory entry as deleted
+    entry_to_delete->filename[0] = 0xE5;
+
+    // Write the updated directory entry back to disk
+    uint32_t sector_offset_in_cluster =
+        (entry_lba - fat32_get_cluster_lba(current_cluster)) *
+        fs->bytes_per_sector;
+    if (!ata_write_sectors(fs->drive, entry_lba, 1,
+                           cluster_data + sector_offset_in_cluster)) {
+        log_err("Failed to write updated directory entry for '%s'", filename);
+        free(cluster_data);
+        return false;
+    }
+
+    // Free the clusters associated with the file
+    uint32_t first_data_cluster = (entry_to_delete->first_cluster_high << 16) |
+                                  entry_to_delete->first_cluster_low;
+    uint32_t data_cluster_to_free = first_data_cluster;
+    while (data_cluster_to_free >= 2 &&
+           (data_cluster_to_free & 0x0FFFFFFF) < 0x0FFFFF8) {
+        uint32_t next_data_cluster =
+            fat32_get_next_cluster(data_cluster_to_free);
+        fat32_set_next_cluster(fs, data_cluster_to_free, 0); // Mark as free
+        data_cluster_to_free = next_data_cluster;
+    }
+
+    free(cluster_data);
+    log_info("FAT32: File '%s' deleted successfully.", filename);
     return true;
 }

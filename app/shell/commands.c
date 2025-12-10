@@ -358,7 +358,7 @@ void cmd_cat(int argc, char **argv)
     free(file_entry);
 }
 
-void cmd_write_file(int argc, char **argv)
+void cmd_write(int argc, char **argv)
 {
     if (argc < 3) {
         printf("Usage: write <filename> <content>\n");
@@ -383,5 +383,30 @@ void cmd_write_file(int argc, char **argv)
         printf("File '%s' written successfully.\n", filename);
     } else {
         printf("Failed to write file '%s'.\n", filename);
+    }
+}
+
+void cmd_rm(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("Usage: rm <filename>\n");
+        return;
+    }
+
+    if (!fat32_is_mounted()) {
+        printf("No filesystem mounted. Use 'mount' first.\n");
+        return;
+    }
+
+    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
+    const char *filename = argv[1];
+
+    // TODO: delete from the current directory instead of the root directory.
+    uint32_t parent_cluster = mounted_fs->root_cluster;
+
+    if (fat32_delete_file(parent_cluster, filename)) {
+        printf("File '%s' deleted successfully.\n", filename);
+    } else {
+        printf("Failed to delete file '%s'.\n", filename);
     }
 }

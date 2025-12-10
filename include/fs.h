@@ -93,3 +93,4 @@ void fat32_format_filename(const fat32_dir_entry_t *entry, char *buffer,
                            size_t buffer_size);
 bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
                       const char *filename, const uint8_t *data, uint32_t size);
+bool fat32_delete_file(uint32_t cluster, const char *filename);

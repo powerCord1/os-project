@@ -31,7 +31,8 @@ void cmd_mount(int argc, char **argv);
 void cmd_umount(int argc, char **argv);
 void cmd_ls(int argc, char **argv);
 void cmd_cat(int argc, char **argv);
-void cmd_write_file(int argc, char **argv);
+void cmd_write(int argc, char **argv);
+void cmd_rm(int argc, char **argv);
 
 extern const cmd_list_t cmds[];
 extern uint8_t cmd_count;
