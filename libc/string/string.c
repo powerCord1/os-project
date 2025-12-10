@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <debug.h>
 #include <heap.h>
 #include <string.h>
 
@@ -79,11 +80,18 @@ char *strtok(char *str, const char *delim)
     if (str) {
         last_token = str;
     } else if (!last_token) {
+        log_verbose("strtok: no string to tokenize");
+        return NULL;
+    }
+
+    if (*last_token == '\0') {
+        log_verbose("strtok: no more tokens");
         return NULL;
     }
 
     str = last_token + strspn(last_token, delim);
     if (*str == '\0') {
+        log_verbose("strtok: no more tokens");
         last_token = NULL;
         return NULL;
     }
@@ -109,13 +117,22 @@ char *strpbrk(const char *str, const char *accept)
             }
         }
     }
+    log_verbose("strpbrk: no matching character found");
     return NULL;
 }
 
-static inline int tolower(int c)
+int tolower(int c)
 {
     if (c >= 'A' && c <= 'Z') {
         return c - 'A' + 'a';
+    }
+    return c;
+}
+
+int toupper(int c)
+{
+    if (c >= 'a' && c <= 'z') {
+        return c - 'a' + 'A';
     }
     return c;
 }
@@ -157,6 +174,21 @@ size_t strspn(const char *str, const char *accept)
     }
 
     return count;
+}
+
+char *strchr(const char *s, int c)
+{
+    while (*s != '\0') {
+        if (*s == (char)c) {
+            return (char *)s;
+        }
+        s++;
+    }
+    if (c == '\0') {
+        return (char *)s;
+    }
+    log_verbose("strchr: character not found in string");
+    return NULL;
 }
 
 size_t strlen(const char *str)
@@ -233,6 +265,7 @@ char *strdup(const char *s)
     size_t len = strlen(s) + 1;
     char *new_s = malloc(len);
     if (new_s == NULL) {
+        log_err("strdup: memory allocation failed");
         return NULL;
     }
     return strcpy(new_s, s);

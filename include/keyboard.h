@@ -188,6 +188,7 @@ void kbd_init();
 void kbd_set_leds();
 void kbd_set_typematic_rate(uint8_t rate, uint8_t delay);
 key_t kbd_get_key(bool);
+bool kbd_is_modifier_key(uint8_t scancode);
 char kbd_capitalise(char c);
 void kbd_dump_modifiers();
 void wait_for_kbd();

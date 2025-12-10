@@ -37,6 +37,7 @@ const cmd_list_t cmds[] = {
     {"umount", &cmd_umount},
     {"ls", &cmd_ls},
     {"cat", &cmd_cat},
+    {"writefile", &cmd_write_file},
 };
 uint8_t cmd_count;
 bool exit;

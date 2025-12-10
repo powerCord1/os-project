@@ -84,7 +84,12 @@ bool fat32_is_mounted();
 fat32_fs_t *fat32_get_mounted_fs();
 uint32_t fat32_get_cluster_lba(uint32_t cluster);
 uint32_t fat32_get_next_cluster(uint32_t current_cluster);
+void fat32_set_next_cluster(fat32_fs_t *fs, uint32_t current_cluster,
+                            uint32_t next_cluster);
+uint32_t fat32_find_free_cluster(fat32_fs_t *fs);
 char **fat32_list_directory(uint32_t cluster, int *dir_count);
 fat32_dir_entry_t *fat32_find_file(uint32_t cluster, const char *filename);
 void fat32_format_filename(const fat32_dir_entry_t *entry, char *buffer,
                            size_t buffer_size);
+bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
+                      const char *filename, const uint8_t *data, uint32_t size);

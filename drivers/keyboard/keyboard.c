@@ -32,7 +32,7 @@ void kbd_init()
 
 uint8_t get_key()
 {
-    return inb(0x60);
+    return inb(KBD_DATA_PORT);
 }
 
 void kbd_set_leds()
@@ -116,9 +116,7 @@ void keyboard_handler()
         }
 
         last_char = scancode_map[key];
-
         last_scancode = key;
-
         log_kbd_action("key pressed: 0x%x", key);
 
         switch (key) {
@@ -159,6 +157,12 @@ key_t kbd_get_key(bool wait)
     }
     last_key.key = scancode_map[last_scancode];
     last_key.scancode = last_scancode;
+    if (kbd_is_modifier_key(last_scancode) || last_key.key == 0) {
+        return last_key;
+    }
+    if (kbd_modifiers.shift || kbd_modifiers.caps_lock) {
+        last_key.key = kbd_capitalise(last_key.key);
+    }
     return last_key;
 }
 
@@ -166,6 +170,22 @@ char kbd_capitalise(char c)
 {
     c -= ('a' - 'A');
     return c;
+}
+
+bool kbd_is_modifier_key(uint8_t scancode)
+{
+    switch (scancode) {
+    case KEY_SHIFT_LEFT:
+    case KEY_SHIFT_RIGHT:
+    case KEY_CTRL_LEFT:
+    case KEY_ALT_LEFT:
+    case KEY_CAPSLOCK:
+    case KEY_NUMLOCK:
+    case KEY_SCROLLLOCK:
+        return true;
+    default:
+        return false;
+    }
 }
 
 void kbd_dump_modifiers()

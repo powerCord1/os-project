@@ -37,9 +37,6 @@ void typewriter_main()
 
             bool is_alpha = (c >= 'a' && c <= 'z');
 
-            if (is_alpha && (kbd_modifiers.shift ^ kbd_modifiers.caps_lock)) {
-                c = kbd_capitalise(c);
-            }
             printf("%c", c);
             continue;
         }

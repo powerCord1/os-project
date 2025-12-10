@@ -357,3 +357,31 @@ void cmd_cat(int argc, char **argv)
     free(cluster_buffer);
     free(file_entry);
 }
+
+void cmd_write_file(int argc, char **argv)
+{
+    if (argc < 3) {
+        printf("Usage: write <filename> <content>\n");
+        return;
+    }
+
+    if (!fat32_is_mounted()) {
+        printf("No filesystem mounted. Use 'mount' first.\n");
+        return;
+    }
+
+    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
+    const char *filename = argv[1];
+    const char *content = argv[2];
+    uint32_t content_size = strlen(content);
+
+    // TODO: write to the current directory instead of the root directory.
+    uint32_t parent_cluster = mounted_fs->root_cluster;
+
+    if (fat32_write_file(mounted_fs, parent_cluster, filename,
+                         (const uint8_t *)content, content_size)) {
+        printf("File '%s' written successfully.\n", filename);
+    } else {
+        printf("Failed to write file '%s'.\n", filename);
+    }
+}
