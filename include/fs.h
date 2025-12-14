@@ -95,6 +95,9 @@ void fat32_format_filename(const fat32_dir_entry_t *entry, char *buffer,
                            size_t buffer_size);
 bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
                       const char *filename, const uint8_t *data, uint32_t size);
+static bool find_entry_for_delete_callback(fat32_dir_entry_t *entry,
+                                           uint32_t cluster_lba,
+                                           uint32_t entry_idx, void *user_data);
 bool fat32_delete_file(uint32_t cluster, const char *filename);
 char *fat32_read_file(uint32_t cluster, const char *filename);
 bool fat32_create_directory(uint32_t cluster, const char *dirname);

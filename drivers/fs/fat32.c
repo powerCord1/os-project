@@ -13,6 +13,20 @@
 
 static fat32_fs_t *fs = NULL;
 
+typedef struct {
+    fat32_dir_entry_t *entry;
+    uint32_t cluster_lba;
+    uint32_t entry_idx;
+} find_empty_entry_data_t;
+
+typedef struct {
+    const char *filename;
+    fat32_dir_entry_t *entry;
+    uint32_t cluster_lba;
+    uint32_t entry_idx;
+    uint32_t parent_dir_cluster;
+} find_entry_for_delete_data_t;
+
 bool fat32_mount(int disk_id, uint32_t lba_start, uint32_t num_sectors)
 {
     fs = (fat32_fs_t *)malloc(sizeof(fat32_fs_t));
@@ -489,12 +503,6 @@ bool fat32_resolve_path(const char *path, uint32_t *parent_cluster,
     return *filename != NULL;
 }
 
-typedef struct {
-    fat32_dir_entry_t *entry;
-    uint32_t cluster_lba;
-    uint32_t entry_idx;
-} find_empty_entry_data_t;
-
 static bool find_empty_entry_callback(fat32_dir_entry_t *entry,
                                       uint32_t cluster_lba, uint32_t entry_idx,
                                       void *user_data)
@@ -514,19 +522,47 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
 {
     log_info("FAT32: Writing file '%s' to cluster %d, size %d", filename,
              parent_cluster, size);
-    // valid filename? (8.3 format)
     if (strlen(filename) > 12) { // 8 for name, 1 for dot, 3 for extension
         log_err("FAT32: Filename '%s' is too long. Max 8.3 format.", filename);
         return false;
     }
 
-    // find empty directory entry
-    find_empty_entry_data_t find_data = {NULL, 0, 0};
-    if (!fat32_iterate_directory(parent_cluster, find_empty_entry_callback,
-                                 &find_data)) {
-        log_err("FAT32: No empty directory entry found. Directory full or "
-                "needs extension.");
-        return false;
+    // check if file already exists
+    find_entry_for_delete_data_t find_existing_data = {filename, NULL, 0, 0,
+                                                       parent_cluster};
+    bool found_existing = fat32_iterate_directory(
+        parent_cluster, find_entry_for_delete_callback, &find_existing_data);
+
+    find_empty_entry_data_t find_empty_data = {NULL, 0, 0};
+    uint32_t entry_lba;
+    uint32_t entry_idx_in_sector;
+
+    if (found_existing) {
+        log_verbose("FAT32: Overwriting existing file '%s'", filename);
+        uint32_t cluster_to_free =
+            (find_existing_data.entry->first_cluster_high << 16) |
+            find_existing_data.entry->first_cluster_low;
+        while (cluster_to_free >= 2 &&
+               (cluster_to_free & 0x0FFFFFFF) < 0x0FFFFF8) {
+            uint32_t next_cluster = fat32_get_next_cluster(cluster_to_free);
+            fat32_set_next_cluster(fs, cluster_to_free, 0); // mark as free
+            cluster_to_free = next_cluster;
+        }
+        free(find_existing_data.entry);
+        entry_lba = find_existing_data.cluster_lba;
+        entry_idx_in_sector =
+            (find_existing_data.entry_idx * sizeof(fat32_dir_entry_t)) %
+            fs->bytes_per_sector;
+    } else {
+        if (!fat32_iterate_directory(parent_cluster, find_empty_entry_callback,
+                                     &find_empty_data)) {
+            log_err("FAT32: No empty directory entry found. Directory full.");
+            return false;
+        }
+        entry_lba = find_empty_data.cluster_lba;
+        entry_idx_in_sector =
+            (find_empty_data.entry_idx * sizeof(fat32_dir_entry_t)) %
+            fs->bytes_per_sector;
     }
 
     fat32_dir_entry_t new_entry;
@@ -674,19 +710,16 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
         log_err("Failed to allocate memory for sector buffer");
         return false;
     }
-    uint32_t new_entry_lba = find_data.cluster_lba +
-                             (find_data.entry_idx * sizeof(fat32_dir_entry_t)) /
-                                 fs->bytes_per_sector;
-    if (!disk_read(fs->disk_id, new_entry_lba, 1, sector_buffer)) {
+
+    if (!disk_read(fs->disk_id, entry_lba, 1, sector_buffer)) {
         log_err("Failed to read directory sector for update");
         free(sector_buffer);
         return false;
     }
-    memcpy(sector_buffer + (find_data.entry_idx * sizeof(fat32_dir_entry_t)) %
-                               fs->bytes_per_sector,
-           &new_entry, sizeof(fat32_dir_entry_t));
+    memcpy(sector_buffer + entry_idx_in_sector, &new_entry,
+           sizeof(fat32_dir_entry_t));
 
-    if (!disk_write(fs->disk_id, new_entry_lba, 1, sector_buffer)) {
+    if (!disk_write(fs->disk_id, entry_lba, 1, sector_buffer)) {
         log_err("Failed to write directory entry for '%s'", filename);
         free(sector_buffer);
         return false;
@@ -695,14 +728,6 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
     free(sector_buffer);
     return true;
 }
-
-typedef struct {
-    const char *filename;
-    fat32_dir_entry_t *entry;
-    uint32_t cluster_lba;
-    uint32_t entry_idx;
-    uint32_t parent_dir_cluster;
-} find_entry_for_delete_data_t;
 
 static bool find_entry_for_delete_callback(fat32_dir_entry_t *entry,
                                            uint32_t cluster_lba,
