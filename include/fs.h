@@ -37,7 +37,7 @@ typedef struct {
 } __attribute__((packed)) fat32_vbr_t;
 
 typedef struct {
-    uint8_t drive;
+    int disk_id;
     uint32_t lba_start;
     uint32_t num_sectors;
     uint16_t bytes_per_sector;
@@ -78,7 +78,7 @@ typedef struct {
      FAT32_ATTRIBUTE_SYSTEM | FAT32_ATTRIBUTE_VOLUME_ID)
 
 void fs_init();
-bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors);
+bool fat32_mount(int disk_id, uint32_t lba_start, uint32_t num_sectors);
 bool fat32_unmount();
 bool fat32_is_mounted();
 fat32_fs_t *fat32_get_mounted_fs();

@@ -29,6 +29,7 @@ const cmd_list_t cmds[] = {
     {"soundtest", &cmd_sound_test},
     {"history", &cmd_history},
     {"sysinfo", &cmd_sysinfo},
+    {"meminfo", &cmd_meminfo},
     {"fbtest", &cmd_fbtest},
     {"rgbtest", &cmd_rgbtest},
     {"memtest", &cmd_memtest},

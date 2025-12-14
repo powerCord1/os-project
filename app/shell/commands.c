@@ -117,6 +117,13 @@ void cmd_sysinfo(int argc, char **argv)
            BUILD_TIME, COMMIT);
 }
 
+void cmd_meminfo(int argc, char **argv)
+{
+    printf("Memory information:\n");
+    printf("Used heap memory: %lu bytes (allocated: %lu bytes)\n",
+           heap_get_used_memory(), HEAP_SIZE);
+}
+
 void cmd_fbtest(int argc, char **argv)
 {
     fb_matrix_test();

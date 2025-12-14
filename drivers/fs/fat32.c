@@ -1,9 +1,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <ata.h>
 #include <cmos.h>
 #include <debug.h>
+#include <disk.h>
 #include <fs.h>
 #include <heap.h>
 #include <string.h>
@@ -13,7 +13,7 @@
 
 static fat32_fs_t *fs = NULL;
 
-bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors)
+bool fat32_mount(int disk_id, uint32_t lba_start, uint32_t num_sectors)
 {
     fs = (fat32_fs_t *)malloc(sizeof(fat32_fs_t));
     if (!fs) {
@@ -21,7 +21,7 @@ bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors)
         return NULL;
     }
 
-    fs->drive = drive;
+    fs->disk_id = disk_id;
     fs->lba_start = lba_start;
     fs->num_sectors = num_sectors;
 
@@ -32,7 +32,7 @@ bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors)
         return false;
     }
 
-    if (!ata_read_sectors(drive, lba_start, 1, vbr_data)) {
+    if (!disk_read(disk_id, lba_start, 1, vbr_data)) {
         log_err("Failed to read FAT32 VBR");
         free(vbr_data);
         free(fs);
@@ -59,8 +59,8 @@ bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors)
     fs->fat_start = fs->lba_start + fs->reserved_sector_count;
     fs->data_start = fs->fat_start + (fs->num_fats * fs->fat_size_32);
 
-    log_info("FAT32: Mounted filesystem on drive %d, LBA start 0x%x", fs->drive,
-             fs->lba_start);
+    log_info("FAT32: Mounted filesystem on disk %d, LBA start 0x%x",
+             fs->disk_id, fs->lba_start);
     log_verbose("FAT32: Bytes per sector: %d", fs->bytes_per_sector);
     log_verbose("FAT32: Sectors per cluster: %d", fs->sectors_per_cluster);
     log_verbose("FAT32: Reserved sector count: %d", fs->reserved_sector_count);
@@ -78,7 +78,7 @@ bool fat32_mount(uint8_t drive, uint32_t lba_start, uint32_t num_sectors)
 bool fat32_unmount()
 {
     if (fs) {
-        log_info("FAT32: Unmounted filesystem on drive %d", fs->drive);
+        log_info("FAT32: Unmounted filesystem on disk %d", fs->disk_id);
         free(fs);
         fs = NULL;
         return true;
@@ -115,7 +115,7 @@ uint32_t fat32_get_next_cluster(uint32_t current_cluster)
         return 0;
     }
 
-    if (!ata_read_sectors(fs->drive, fat_sector, 1, fat_sector_data)) {
+    if (!disk_read(fs->disk_id, fat_sector, 1, fat_sector_data)) {
         log_err("Failed to read FAT sector at LBA 0x%x", fat_sector);
         free(fat_sector_data);
         return 0;
@@ -141,7 +141,7 @@ void fat32_set_next_cluster(fat32_fs_t *fs, uint32_t current_cluster,
         return;
     }
 
-    if (!ata_read_sectors(fs->drive, fat_sector, 1, fat_sector_data)) {
+    if (!disk_read(fs->disk_id, fat_sector, 1, fat_sector_data)) {
         log_err("Failed to read FAT sector at LBA 0x%x", fat_sector);
         free(fat_sector_data);
         return;
@@ -149,7 +149,7 @@ void fat32_set_next_cluster(fat32_fs_t *fs, uint32_t current_cluster,
 
     *((uint32_t *)&fat_sector_data[entry_offset]) = next_cluster;
 
-    if (!ata_write_sectors(fs->drive, fat_sector, 1, fat_sector_data)) {
+    if (!disk_write(fs->disk_id, fat_sector, 1, fat_sector_data)) {
         log_err("Failed to write FAT sector at LBA 0x%x", fat_sector);
     }
 
@@ -171,8 +171,8 @@ uint32_t fat32_find_free_cluster(fat32_fs_t *fs)
          fat_sector_idx += fat_sectors_per_read) {
         uint32_t current_fat_lba = fs->fat_start + fat_sector_idx;
 
-        if (!ata_read_sectors(fs->drive, current_fat_lba, fat_sectors_per_read,
-                              fat_sector_data)) {
+        if (!disk_read(fs->disk_id, current_fat_lba, fat_sectors_per_read,
+                       fat_sector_data)) {
             log_err("Failed to read FAT sector at LBA 0x%x", current_fat_lba);
             free(fat_sector_data);
             return 0;
@@ -254,8 +254,8 @@ static bool fat32_iterate_directory(uint32_t start_cluster,
     uint32_t current_cluster = start_cluster;
     while (current_cluster >= 2 && (current_cluster & 0x0FFFFFFF) < 0x0FFFFF8) {
         uint32_t cluster_lba = fat32_get_cluster_lba(current_cluster);
-        if (!ata_read_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
-                              cluster_data)) {
+        if (!disk_read(fs->disk_id, cluster_lba, fs->sectors_per_cluster,
+                       cluster_data)) {
             log_err("Failed to read cluster %d at LBA 0x%x", current_cluster,
                     cluster_lba);
             free(cluster_data);
@@ -656,8 +656,8 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
         memset(write_buffer, 0, fs->bytes_per_sector * fs->sectors_per_cluster);
         memcpy(write_buffer, data + data_offset, bytes_to_write_to_cluster);
 
-        if (!ata_write_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
-                               write_buffer)) {
+        if (!disk_write(fs->disk_id, cluster_lba, fs->sectors_per_cluster,
+                        write_buffer)) {
             log_err("Failed to write cluster %d for file data.",
                     current_data_cluster);
             free(write_buffer);
@@ -677,7 +677,7 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
     uint32_t new_entry_lba = find_data.cluster_lba +
                              (find_data.entry_idx * sizeof(fat32_dir_entry_t)) /
                                  fs->bytes_per_sector;
-    if (!ata_read_sectors(fs->drive, new_entry_lba, 1, sector_buffer)) {
+    if (!disk_read(fs->disk_id, new_entry_lba, 1, sector_buffer)) {
         log_err("Failed to read directory sector for update");
         free(sector_buffer);
         return false;
@@ -686,7 +686,7 @@ bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
                                fs->bytes_per_sector,
            &new_entry, sizeof(fat32_dir_entry_t));
 
-    if (!ata_write_sectors(fs->drive, new_entry_lba, 1, sector_buffer)) {
+    if (!disk_write(fs->disk_id, new_entry_lba, 1, sector_buffer)) {
         log_err("Failed to write directory entry for '%s'", filename);
         free(sector_buffer);
         return false;
@@ -759,7 +759,7 @@ bool fat32_delete_file(uint32_t cluster, const char *filename)
         log_err("Failed to allocate memory for sector buffer");
         return false;
     }
-    if (!ata_read_sectors(fs->drive, entry_lba, 1, sector_buffer)) {
+    if (!disk_read(fs->disk_id, entry_lba, 1, sector_buffer)) {
         log_err("Failed to read directory sector for update");
         free(sector_buffer);
         return false;
@@ -768,7 +768,7 @@ bool fat32_delete_file(uint32_t cluster, const char *filename)
                                fs->bytes_per_sector,
            entry_to_delete, sizeof(fat32_dir_entry_t));
 
-    if (!ata_write_sectors(fs->drive, entry_lba, 1, sector_buffer)) {
+    if (!disk_write(fs->disk_id, entry_lba, 1, sector_buffer)) {
         log_err("Failed to write updated directory entry for '%s'", filename);
         free(sector_buffer);
         return false;
@@ -835,8 +835,8 @@ char *fat32_read_file(uint32_t cluster, const char *filename)
            bytes_read < file_size) {
         uint32_t cluster_lba = fat32_get_cluster_lba(current_data_cluster);
 
-        if (!ata_read_sectors(fs->drive, cluster_lba, fs->sectors_per_cluster,
-                              cluster_data_buffer)) {
+        if (!disk_read(fs->disk_id, cluster_lba, fs->sectors_per_cluster,
+                       cluster_data_buffer)) {
             log_err("Failed to read cluster %d for file data.",
                     current_data_cluster);
             free(file_entry);
@@ -933,7 +933,7 @@ bool fat32_create_directory(uint32_t cluster, const char *dirname)
     uint32_t new_entry_lba = find_data.cluster_lba +
                              (find_data.entry_idx * sizeof(fat32_dir_entry_t)) /
                                  fs->bytes_per_sector;
-    if (!ata_read_sectors(fs->drive, new_entry_lba, 1, sector_buffer)) {
+    if (!disk_read(fs->disk_id, new_entry_lba, 1, sector_buffer)) {
         log_err("Failed to read directory sector for update");
         free(sector_buffer);
         return false;
@@ -942,7 +942,7 @@ bool fat32_create_directory(uint32_t cluster, const char *dirname)
                                fs->bytes_per_sector,
            &new_entry, sizeof(fat32_dir_entry_t));
 
-    if (!ata_write_sectors(fs->drive, new_entry_lba, 1, sector_buffer)) {
+    if (!disk_write(fs->disk_id, new_entry_lba, 1, sector_buffer)) {
         log_err("Failed to write directory entry for '%s'", dirname);
         free(sector_buffer);
         return false;
@@ -996,8 +996,8 @@ bool fat32_create_directory(uint32_t cluster, const char *dirname)
         (uint16_t)((parent_cluster_for_dot_dot >> 16) & 0xFFFF);
     dot_dot_entry->file_size = 0;
 
-    if (!ata_write_sectors(fs->drive, fat32_get_cluster_lba(new_dir_cluster),
-                           fs->sectors_per_cluster, new_dir_cluster_data)) {
+    if (!disk_write(fs->disk_id, fat32_get_cluster_lba(new_dir_cluster),
+                    fs->sectors_per_cluster, new_dir_cluster_data)) {
         log_err("Failed to write initial directory entries for '%s'", dirname);
         free(new_dir_cluster_data);
         return false;
@@ -1064,7 +1064,7 @@ bool fat32_delete_directory(uint32_t cluster, const char *dirname)
         log_err("Failed to allocate memory for sector buffer");
         return false;
     }
-    if (!ata_read_sectors(fs->drive, entry_lba, 1, sector_buffer)) {
+    if (!disk_read(fs->disk_id, entry_lba, 1, sector_buffer)) {
         log_err("Failed to read directory sector for update");
         free(sector_buffer);
         return false;
@@ -1073,7 +1073,7 @@ bool fat32_delete_directory(uint32_t cluster, const char *dirname)
                                fs->bytes_per_sector,
            entry_to_delete, sizeof(fat32_dir_entry_t));
 
-    if (!ata_write_sectors(fs->drive, entry_lba, 1, sector_buffer)) {
+    if (!disk_write(fs->disk_id, entry_lba, 1, sector_buffer)) {
         log_err("Failed to write updated directory entry for '%s'", dirname);
         free(sector_buffer);
         return false;

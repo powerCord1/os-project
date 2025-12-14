@@ -5,8 +5,6 @@
 #include <stddef.h>
 #include <string.h>
 
-#define HEAP_SIZE 1024 * 1024 // 1 MB
-
 static uint8_t heap[HEAP_SIZE];
 
 typedef struct block {
@@ -93,4 +91,17 @@ void *realloc(void *ptr, size_t size)
     memcpy(new_ptr, ptr, block->size);
     free(ptr);
     return new_ptr;
+}
+
+size_t heap_get_used_memory()
+{
+    size_t used_memory = 0;
+    block_t *curr = heap_start;
+    while (curr) {
+        if (!curr->free) {
+            used_memory += curr->size + sizeof(block_t);
+        }
+        curr = curr->next;
+    }
+    return used_memory;
 }
