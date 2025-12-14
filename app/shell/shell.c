@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include <app.h>
+#include <array.h>
 #include <cmos.h>
 #include <cpu.h>
 #include <debug.h>
@@ -54,7 +55,7 @@ static bool is_recall_active = false;
 void shell_main()
 {
     static int history_index = 0;
-    cmd_count = sizeof(cmds) / sizeof(cmd_list_t);
+    cmd_count = ARRAY_SIZE(cmds);
 
     exit = false;
     uint16_t i = 0;

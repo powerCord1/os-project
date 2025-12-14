@@ -1,3 +1,4 @@
+#include <array.h>
 #include <ata.h>
 #include <cpu.h>
 #include <debug.h>
@@ -12,50 +13,70 @@
 #include <limine.h>
 #include <pit.h>
 #include <serial.h>
+#include <stdio.h>
 #include <tty.h>
+
+boot_task_t early_boot_tasks[] = {
+    {.msg = "Init serial", .func = serial_init}, // so we can get debug info
+    {.msg = "Log boot info", .func = log_boot_info},
+    {.msg = "Store boot time", .func = store_boot_time},
+};
+
+boot_task_t boot_tasks[] = {
+    {.msg = "Send Limine requests", .func = limine_init},
+    {.msg = "Init font", .func = font_init},
+    {.msg = "Init framebuffer", .func = fb_init},
+    {.msg = "Init CPU Features", .func = cpu_init},
+    {.msg = "Init GDT", .func = gdt_init},
+    {.msg = "Init IDT", .func = idt_init},
+    {.msg = "Init heap", .func = heap_init},
+    {.msg = "Init disk drivers and filesystems", .func = fs_init},
+    {.msg = "Init PIT", .func = pit_init},
+    {.msg = "Init keyboard", .func = kbd_init},
+};
+
+boot_task_t late_boot_tasks[] = {
+    {.msg = "Enable interrupts", .func = enable_interrupts},
+    {.msg = "Wait for interrupt", .func = wait_for_interrupt},
+};
 
 void sys_init()
 {
-    serial_init(); // init serial early so we can get debug info
+    init_early();
+    execute_tasks(boot_tasks, ARRAY_SIZE(boot_tasks));
+    init_late();
+}
 
-    log_info("Build version: %s", BUILD_VERSION);
-    log_info("Build time: %s", BUILD_TIME);
-    log_info("Commit: %s", COMMIT);
+void init_early()
+{
+    execute_tasks(early_boot_tasks, ARRAY_SIZE(early_boot_tasks));
+    init_late();
+}
 
-    store_boot_time();
-    log_info("Boot time: %d/%d/%d %d:%d:%d", boot_time.day, boot_time.month,
-             boot_time.year, boot_time.hour, boot_time.minute,
-             boot_time.second);
-
-    log_verbose("Initializing Limine");
-    limine_init();
-    log_verbose("Initializing PSF font");
-    font_init();
-    log_verbose("Initializing framebuffer");
-    fb_init();
-    log_verbose("Initializing CPU features");
-    cpu_init();
-    log_verbose("Initializing GDT");
-    gdt_init();
-    log_verbose("Initializing IDT");
-    idt_init();
-    log_verbose("Initializing heap");
-    heap_init();
-    log_verbose("Initialising ATA driver");
-    ata_init();
-    log_verbose("Automounting file systems");
-    fs_init();
-    log_verbose("Initializing PIT");
-    pit_init(1000);
-    log_verbose("Initializing keyboard");
-    kbd_init();
-    log_verbose("Enabling interrupts");
-    enable_interrupts();
-    log_verbose("Waiting for an interrupt");
-    wait_for_interrupt();
+void init_late()
+{
+    log_verbose("Running late initialisation");
 }
 
 void store_boot_time()
 {
     cmos_get_datetime(&boot_time);
+    log_info("Boot time: %d/%d/%d %d:%d:%d", boot_time.day, boot_time.month,
+             boot_time.year, boot_time.hour, boot_time.minute,
+             boot_time.second);
+}
+
+void log_boot_info()
+{
+    log_info("Build version: %s", BUILD_VERSION);
+    log_info("Build time: %s", BUILD_TIME);
+    log_info("Commit: %s", COMMIT);
+}
+
+void execute_tasks(boot_task_t *tasks, size_t num_tasks)
+{
+    for (size_t i = 0; i < num_tasks; i++) {
+        printf("%s\n", tasks[i].msg);
+        tasks[i].func();
+    }
 }

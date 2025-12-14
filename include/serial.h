@@ -1,6 +1,6 @@
 #include <stdarg.h>
 
-int serial_init();
+void serial_init();
 int serial_received();
 char read_serial();
 void write_serial(char a);

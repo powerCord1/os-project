@@ -1,4 +1,5 @@
 #include <app.h>
+#include <array.h>
 #include <debug.h>
 #include <framebuffer.h>
 #include <menu.h>
@@ -15,8 +16,7 @@ void main_menu()
                      {"PIT test", &pit_test_main},
                      {"Sine Wave Test", &sin_test_main},
                      {"BMP test", &bmp_test_main}};
-    create_menu("Main menu", "Choose an app to launch", apps,
-                sizeof(apps) / sizeof(menu_t));
+    create_menu("Main menu", "Choose an app to launch", apps, ARRAY_SIZE(apps));
 }
 
 void power_menu()
@@ -24,6 +24,6 @@ void power_menu()
     log_info("Entering power menu");
     menu_t options[] = {{"Reboot", &reboot}, {"Shutdown", &shutdown}};
     create_menu("Power menu", "Select an option:", options,
-                sizeof(options) / sizeof(menu_t));
+                ARRAY_SIZE(options));
     fb_clear();
 }

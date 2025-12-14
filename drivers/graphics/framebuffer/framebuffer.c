@@ -31,6 +31,7 @@ const uint32_t default_bg = 0x000000;
 cursor_t cursor;
 
 static bool overwrite_mode = false;
+bool fb_is_initialised = false;
 
 void fb_init()
 {
@@ -54,8 +55,9 @@ void fb_init()
     cursor.y = 0;
     cursor.visible = false;
 
+    fb_is_initialised = true;
     fb_clear();
-    printf("Booting...");
+    printf("Booting...\n\n");
 }
 
 struct limine_framebuffer *get_fb_data()

@@ -8,6 +8,7 @@
 
 extern struct limine_framebuffer *fb;
 extern volatile uint32_t *fb_ptr;
+extern bool fb_is_initialised;
 
 typedef struct {
     uint32_t x;

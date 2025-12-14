@@ -6,10 +6,13 @@
 #include <pit.h>
 #include <stdio.h>
 
+#define PIT_FREQUENCY 1000
+
 volatile uint64_t pit_ticks = 0;
 
-void pit_init(uint32_t frequency)
+void pit_init()
 {
+    uint32_t frequency = PIT_FREQUENCY;
     log_verbose("Setting PIT frequency to %d", frequency);
     if (frequency == 0) {
         log_warn("PIT frequency is zero");

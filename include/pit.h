@@ -9,6 +9,6 @@
 
 extern volatile uint64_t pit_ticks;
 
-void pit_init(uint32_t frequency);
+void pit_init();
 void pit_handler();
 void pit_wait_ms(size_t ticks);
