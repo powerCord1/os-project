@@ -80,18 +80,15 @@ char *strtok(char *str, const char *delim)
     if (str) {
         last_token = str;
     } else if (!last_token) {
-        log_verbose("strtok: no string to tokenize");
         return NULL;
     }
 
     if (*last_token == '\0') {
-        log_verbose("strtok: no more tokens");
         return NULL;
     }
 
     str = last_token + strspn(last_token, delim);
     if (*str == '\0') {
-        log_verbose("strtok: no more tokens");
         last_token = NULL;
         return NULL;
     }
@@ -117,7 +114,6 @@ char *strpbrk(const char *str, const char *accept)
             }
         }
     }
-    log_verbose("strpbrk: no matching character found");
     return NULL;
 }
 
@@ -189,6 +185,20 @@ char *strchr(const char *s, int c)
     }
     log_verbose("strchr: character not found in string");
     return NULL;
+}
+
+char *strrchr(const char *s, int c)
+{
+    const char *last = NULL;
+    do {
+        if (*s == (char)c) {
+            last = s;
+        }
+    } while (*s++);
+
+    // The log is commented out as it can be noisy, but is useful for debugging.
+    // if (!last) log_verbose("strrchr: character not found in string");
+    return (char *)last;
 }
 
 size_t strlen(const char *str)

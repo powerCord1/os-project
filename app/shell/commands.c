@@ -337,13 +337,20 @@ void cmd_write(int argc, char **argv)
         return;
     }
 
-    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
-    const char *filename = argv[1];
+    const char *path = argv[1];
     const char *content = argv[2];
     uint32_t content_size = strlen(content);
+    char *filename = NULL;
+    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
+    uint32_t parent_cluster;
 
-    // TODO: write to the current directory instead of the root directory.
-    uint32_t parent_cluster = mounted_fs->root_cluster;
+    if (!fat32_resolve_path(path, &parent_cluster, &filename)) {
+        printf("Error: Invalid path or filename.\n");
+        if (filename) {
+            free((void *)filename);
+        }
+        return;
+    }
 
     if (fat32_write_file(mounted_fs, parent_cluster, filename,
                          (const uint8_t *)content, content_size)) {
@@ -351,6 +358,7 @@ void cmd_write(int argc, char **argv)
     } else {
         printf("Failed to write file '%s'.\n", filename);
     }
+    free((void *)filename);
 }
 
 void cmd_rm(int argc, char **argv)
@@ -365,17 +373,24 @@ void cmd_rm(int argc, char **argv)
         return;
     }
 
-    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
-    const char *filename = argv[1];
+    const char *path = argv[1];
+    char *filename = NULL;
+    uint32_t parent_cluster;
 
-    // TODO: delete from the current directory instead of the root directory.
-    uint32_t parent_cluster = mounted_fs->root_cluster;
+    if (!fat32_resolve_path(path, &parent_cluster, &filename)) {
+        printf("Error: Invalid path or filename.\n");
+        if (filename) {
+            free((void *)filename);
+        }
+        return;
+    }
 
     if (fat32_delete_file(parent_cluster, filename)) {
         printf("File '%s' deleted successfully.\n", filename);
     } else {
         printf("Failed to delete file '%s'.\n", filename);
     }
+    free((void *)filename);
 }
 
 void cmd_mkdir(int argc, char **argv)
@@ -390,16 +405,24 @@ void cmd_mkdir(int argc, char **argv)
         return;
     }
 
-    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
-    const char *dirname = argv[1];
+    const char *path = argv[1];
+    char *new_dirname = NULL;
+    uint32_t parent_cluster;
 
-    uint32_t parent_cluster = mounted_fs->root_cluster;
-
-    if (fat32_create_directory(parent_cluster, dirname)) {
-        printf("Directory '%s' created successfully.\n", dirname);
-    } else {
-        printf("Failed to create directory '%s'.\n", dirname);
+    if (!fat32_resolve_path(path, &parent_cluster, &new_dirname)) {
+        printf("Error: Invalid path or filename.\n");
+        if (new_dirname) {
+            free((void *)new_dirname);
+        }
+        return;
     }
+
+    if (fat32_create_directory(parent_cluster, new_dirname)) {
+        printf("Directory '%s' created successfully.\n", new_dirname);
+    } else {
+        printf("Failed to create directory '%s'.\n", new_dirname);
+    }
+    free((void *)new_dirname);
 }
 
 void cmd_rmdir(int argc, char **argv)
@@ -414,14 +437,22 @@ void cmd_rmdir(int argc, char **argv)
         return;
     }
 
-    fat32_fs_t *mounted_fs = fat32_get_mounted_fs();
-    const char *dirname = argv[1];
+    const char *path = argv[1];
+    char *dirname_to_del = NULL;
+    uint32_t parent_cluster;
 
-    uint32_t parent_cluster = mounted_fs->root_cluster;
-
-    if (fat32_delete_directory(parent_cluster, dirname)) {
-        printf("Directory '%s' deleted successfully.\n", dirname);
-    } else {
-        printf("Failed to delete directory '%s'.\n", dirname);
+    if (!fat32_resolve_path(path, &parent_cluster, &dirname_to_del)) {
+        printf("Error: Invalid path or filename.\n");
+        if (dirname_to_del) {
+            free((void *)dirname_to_del);
+        }
+        return;
     }
+
+    if (fat32_delete_directory(parent_cluster, dirname_to_del)) {
+        printf("Directory '%s' deleted successfully.\n", dirname_to_del);
+    } else {
+        printf("Failed to delete directory '%s'.\n", dirname_to_del);
+    }
+    free((void *)dirname_to_del);
 }

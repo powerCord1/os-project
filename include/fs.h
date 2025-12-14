@@ -89,6 +89,8 @@ void fat32_set_next_cluster(fat32_fs_t *fs, uint32_t current_cluster,
 uint32_t fat32_find_free_cluster(fat32_fs_t *fs);
 char **fat32_list_directory(uint32_t cluster, int *dir_count);
 fat32_dir_entry_t *fat32_find_file(uint32_t cluster, const char *filename);
+bool fat32_resolve_path(const char *path, uint32_t *parent_cluster,
+                        char **filename);
 void fat32_format_filename(const fat32_dir_entry_t *entry, char *buffer,
                            size_t buffer_size);
 bool fat32_write_file(fat32_fs_t *fs, uint32_t parent_cluster,
