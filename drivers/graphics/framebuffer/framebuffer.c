@@ -58,6 +58,8 @@ void fb_init()
     fb_is_initialised = true;
     fb_clear();
     printf("Booting...\n\n");
+    print_build_info();
+    printf("\n");
 }
 
 struct limine_framebuffer *get_fb_data()

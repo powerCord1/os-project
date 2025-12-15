@@ -50,12 +50,12 @@ void sys_init()
 void init_early()
 {
     execute_tasks(early_boot_tasks, ARRAY_SIZE(early_boot_tasks));
-    init_late();
 }
 
 void init_late()
 {
     log_verbose("Running late initialisation");
+    execute_tasks(late_boot_tasks, ARRAY_SIZE(late_boot_tasks));
 }
 
 void store_boot_time()

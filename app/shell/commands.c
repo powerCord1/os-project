@@ -113,8 +113,7 @@ void cmd_sysinfo(int argc, char **argv)
     printf("RFLAGS: 0x%016lx\n", rflags);
 
     printf("APIC:   %s\n\n", is_apic_enabled() ? "enabled" : "disabled");
-    printf("Build version: %s\nBuild time: %s\nCommit: %s\n", BUILD_VERSION,
-           BUILD_TIME, COMMIT);
+    print_build_info();
 }
 
 void cmd_meminfo(int argc, char **argv)

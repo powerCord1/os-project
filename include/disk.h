@@ -34,3 +34,6 @@ bool disk_write(int disk_id, uint64_t lba, uint32_t count, const void *buf);
 
 void register_disk(disk_driver_t *driver, void *driver_data, const char *name,
                    uint64_t num_sectors);
+
+// Forward declare driver init functions
+void nvme_init(disk_driver_t *driver);

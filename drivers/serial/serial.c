@@ -77,9 +77,16 @@ static int serial_putchar(int c)
     return c;
 }
 
+static int serial_putchar_wrapper(int c, void *unused)
+{
+    (void)unused; // this is so the function can be passed to vprintf_generic,
+                  // which requires a second paramater
+    return serial_putchar(c);
+}
+
 int vserial_printf(const char *restrict format, va_list parameters)
 {
-    return vprintf_generic(serial_putchar, format, parameters);
+    return vprintf_generic(serial_putchar_wrapper, NULL, format, parameters);
 }
 
 int serial_printf(const char *restrict format, ...)

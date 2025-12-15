@@ -92,3 +92,9 @@ void log_kbd_action(const char *format, ...)
         va_end(args);
     }
 }
+
+void print_build_info()
+{
+    printf("Build version: %s\nBuild time: %s\nCommit: %s\n", BUILD_VERSION,
+           BUILD_TIME, COMMIT);
+}

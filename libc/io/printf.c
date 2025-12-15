@@ -7,11 +7,12 @@
 #include <string.h>
 #include <tty.h>
 
-static bool print(int (*putc_func)(int), const char *data, size_t length)
+static bool print(int (*putc_func)(int, void *), void *putc_data,
+                  const char *data, size_t length)
 {
     const unsigned char *bytes = (const unsigned char *)data;
     for (size_t i = 0; i < length; i++) {
-        if (putc_func(bytes[i]) == -1) {
+        if (putc_func(bytes[i], putc_data) == -1) {
             return false;
         }
     }
@@ -37,7 +38,7 @@ static char *ultohexa(char *dest, unsigned long x)
     return dest;
 }
 
-int vprintf_generic(int (*putc_func)(int),
+int vprintf_generic(int (*putc_func)(int, void *), void *putc_data,
                     const char *restrict format, // NOLINT
                     va_list parameters)
 {
@@ -58,7 +59,7 @@ int vprintf_generic(int (*putc_func)(int),
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(putc_func, format, amount)) {
+            if (!print(putc_func, putc_data, format, amount)) {
                 return -1;
             }
             format += amount;
@@ -79,7 +80,7 @@ int vprintf_generic(int (*putc_func)(int),
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (putc_func(c) == -1) {
+            if (putc_func(c, putc_data) == -1) {
                 return -1;
             }
             written++;
@@ -92,7 +93,7 @@ int vprintf_generic(int (*putc_func)(int),
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(putc_func, str, len)) {
+            if (!print(putc_func, putc_data, str, len)) {
                 return -1;
             }
             written += len;
@@ -133,9 +134,9 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             for (int i = 0; i < padding; i++) {
-                putc_func(zero_pad ? '0' : ' ');
+                putc_func(zero_pad ? '0' : ' ', putc_data);
             }
-            print(putc_func, hex_str, len);
+            print(putc_func, putc_data, hex_str, len);
             written += len + padding;
             continue;
         } else if (*format == 'd') {
@@ -151,9 +152,9 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             for (int j = 0; j < padding; j++) {
-                putc_func(zero_pad ? '0' : ' ');
+                putc_func(zero_pad ? '0' : ' ', putc_data);
             }
-            if (!print(putc_func, str, len)) {
+            if (!print(putc_func, putc_data, str, len)) {
                 return -1;
             }
             written += len + padding;
@@ -171,9 +172,9 @@ int vprintf_generic(int (*putc_func)(int),
                 return -1;
             }
             for (int j = 0; j < padding; j++) {
-                putc_func(zero_pad ? '0' : ' ');
+                putc_func(zero_pad ? '0' : ' ', putc_data);
             }
-            if (!print(putc_func, str, len)) {
+            if (!print(putc_func, putc_data, str, len)) {
                 return -1;
             }
             written += len + padding;
@@ -185,7 +186,7 @@ int vprintf_generic(int (*putc_func)(int),
                 // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
-            if (!print(putc_func, format, len)) {
+            if (!print(putc_func, putc_data, format, len)) {
                 return -1;
             }
             written += len;
@@ -196,9 +197,15 @@ int vprintf_generic(int (*putc_func)(int),
     return written;
 }
 
+static int putchar_wrapper(int c, void *unused)
+{
+    (void)unused;
+    return putchar(c);
+}
+
 int vprintf(const char *restrict format, va_list parameters)
 {
-    return vprintf_generic(putchar, format, parameters);
+    return vprintf_generic(putchar_wrapper, NULL, format, parameters);
 }
 
 int printf(const char *restrict format, ...)
@@ -207,5 +214,45 @@ int printf(const char *restrict format, ...)
     va_start(parameters, format);
     int written = vprintf(format, parameters);
     va_end(parameters);
+    return written;
+}
+
+struct snprintf_state {
+    char *str;
+    size_t size;
+    size_t pos;
+};
+
+static int snprintf_putc(int c, void *data)
+{
+    struct snprintf_state *state = (struct snprintf_state *)data;
+    if (state->pos < state->size) {
+        state->str[state->pos] = (char)c;
+    }
+    state->pos++;
+    return c;
+}
+
+int vsnprintf(char *str, size_t size, const char *format, va_list ap)
+{
+    struct snprintf_state state = {str, size > 0 ? size - 1 : 0, 0};
+    int written = vprintf_generic(snprintf_putc, &state, format, ap);
+
+    if (size > 0) {
+        if (state.pos < size) {
+            str[state.pos] = '\0';
+        } else {
+            str[size - 1] = '\0';
+        }
+    }
+    return written;
+}
+
+int snprintf(char *str, size_t size, const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    int written = vsnprintf(str, size, format, ap);
+    va_end(ap);
     return written;
 }

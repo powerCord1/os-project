@@ -144,7 +144,13 @@ void idt_load()
 
 void wait_for_interrupt()
 {
-    while (pit_ticks == 0) {
-        // TODO: panic after 2 seconds of no interrupts
+    uint64_t i = 0;
+    uint64_t init_pit_ticks = pit_ticks;
+    while (pit_ticks == init_pit_ticks) {
+        // TODO: panic after 2 seconds by getting CMOS info, as CPU speed can
+        // change
+        if (++i == 10000000000) {
+            panic("Timed out while waiting for interrupt");
+        }
     }
 }

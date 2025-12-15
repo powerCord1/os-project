@@ -41,6 +41,10 @@ uint16_t pci_get_vendor_id(uint8_t bus, uint8_t device, uint8_t function)
 pci_device_t pci_get_device(uint8_t class_code, uint8_t subclass,
                             uint8_t prog_if)
 {
+    log_verbose(
+        "PCI: Searching for device with class=%x, subclass=%x, prog_if=%x",
+        class_code, subclass, prog_if);
+
     pci_device_t found_dev = {0};
     found_dev.vendor_id = 0xFFFF; // Not found
 

@@ -17,6 +17,7 @@ void log_verbose(const char *format, ...);
 const char *get_log_text(uint8_t type);
 void log_test();
 void log_kbd_action(const char *format, ...);
+void print_build_info();
 void breakpoint();
 
 struct ansi_colors {

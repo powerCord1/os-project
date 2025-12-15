@@ -1,6 +1,7 @@
 #include <ata.h>
 #include <debug.h>
 #include <disk.h>
+#include <nvme.h>
 #include <sata.h>
 #include <string.h>
 
@@ -36,12 +37,18 @@ static disk_driver_t sata_driver = {
     .write_sectors = NULL, // Not implemented yet
 };
 
+static disk_driver_t nvme_driver = {
+    .name = "nvme",
+    .read_sectors = nvme_read,
+    .write_sectors = nvme_write,
+};
+
 void disk_init()
 {
     log_info("Disk: Initializing disk subsystem...");
     disk_count = 0;
 
-    // Discover ATA drives
+    log_verbose("Loading ATA drives");
     for (uint8_t i = 0; i < 4; i++) {
         if (ata_is_drive_present(i)) {
             char name[6];
@@ -52,8 +59,9 @@ void disk_init()
         }
     }
 
-    // Discover SATA drives
+    log_verbose("Loading SATA drives");
     sata_init(&sata_driver);
+    nvme_init(&nvme_driver);
 }
 
 void register_disk(disk_driver_t *driver, void *driver_data, const char *name,
@@ -89,4 +97,9 @@ bool disk_write(int disk_id, uint64_t lba, uint32_t count, const void *buf)
     }
     return disks[disk_id].driver->write_sectors(&disks[disk_id], lba, count,
                                                 buf);
+}
+
+int disk_get_count()
+{
+    return disk_count;
 }
