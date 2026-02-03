@@ -28,7 +28,7 @@ extern "C" {
 #ifdef LIMINE_NO_POINTERS
 #define LIMINE_PTR(TYPE) uint64_t
 #else
-#define LIMINE_PTR(TYPE) TYPE
+#define LIMINE_PTR(TYPE) volatile TYPE
 #endif
 
 #define LIMINE_REQUESTS_START_MARKER                                           \

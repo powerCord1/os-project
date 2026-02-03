@@ -1,3 +1,7 @@
+/*
+    Definitions for main() functions in apps
+*/
+
 void typewriter_main();
 void heap_test_main();
 void memory_test_main();

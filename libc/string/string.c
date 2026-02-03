@@ -271,17 +271,6 @@ char *uitoa(char *dest, unsigned int n)
     return dest;
 }
 
-char *strdup(const char *s)
-{
-    size_t len = strlen(s) + 1;
-    char *new_s = malloc(len);
-    if (new_s == NULL) {
-        log_err("strdup: memory allocation failed");
-        return NULL;
-    }
-    return strcpy(new_s, s);
-}
-
 int atoi(const char *str)
 {
     int res = 0;
@@ -308,4 +297,31 @@ int atoi(const char *str)
     }
 
     return res * sign;
+}
+
+char *strdup(const char *s)
+{
+    size_t len = strlen(s) + 1;
+    char *new_s = malloc(len);
+    if (new_s == NULL) {
+        log_err("strdup: memory allocation failed");
+        return NULL;
+    }
+    return strcpy(new_s, s);
+}
+
+char *strndup(const char *s, size_t n)
+{
+    size_t len = strlen(s);
+    if (n < len) {
+        len = n;
+    }
+    char *new_s = malloc(len + 1);
+    if (new_s == NULL) {
+        log_err("strndup: memory allocation failed");
+        return NULL;
+    }
+    memcpy(new_s, s, len);
+    new_s[len] = '\0';
+    return new_s;
 }

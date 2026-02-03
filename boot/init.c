@@ -1,3 +1,4 @@
+#include <acpi.h>
 #include <array.h>
 #include <ata.h>
 #include <cpu.h>
@@ -15,6 +16,7 @@
 #include <serial.h>
 #include <stdio.h>
 #include <tty.h>
+#include <verinfo.h>
 
 boot_task_t early_boot_tasks[] = {
     {.msg = "Init serial", .func = serial_init}, // so we can get debug info
@@ -26,19 +28,17 @@ boot_task_t boot_tasks[] = {
     {.msg = "Send Limine requests", .func = limine_init},
     {.msg = "Init font", .func = font_init},
     {.msg = "Init framebuffer", .func = fb_init},
-    {.msg = "Init CPU Features", .func = cpu_init},
     {.msg = "Init GDT", .func = gdt_init},
     {.msg = "Init IDT", .func = idt_init},
-    {.msg = "Init heap", .func = heap_init},
-    {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init PIT", .func = pit_init},
+    {.msg = "Init CPU Features", .func = cpu_init},
+    {.msg = "Init heap", .func = heap_init},
+    // {.msg = "Init ACPI", .func = acpi_init},
+    {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init keyboard", .func = kbd_init},
 };
 
-boot_task_t late_boot_tasks[] = {
-    {.msg = "Enable interrupts", .func = enable_interrupts},
-    {.msg = "Wait for interrupt", .func = wait_for_interrupt},
-};
+boot_task_t late_boot_tasks[] = {};
 
 void sys_init()
 {
@@ -68,9 +68,9 @@ void store_boot_time()
 
 void log_boot_info()
 {
-    log_info("Build version: %s", BUILD_VERSION);
-    log_info("Build time: %s", BUILD_TIME);
-    log_info("Commit: %s", COMMIT);
+    log_info("Build version: %s", verinfo.version);
+    log_info("Build time: %s", verinfo.buildtime);
+    log_info("Commit: %s", verinfo.commit);
 }
 
 void execute_tasks(boot_task_t *tasks, size_t num_tasks)

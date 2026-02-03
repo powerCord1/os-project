@@ -117,3 +117,58 @@ ISR_STUB_ERR(security_protection, exceptions[22]);
 
 IRQ_HANDLER(isr_pit, pit_handler, 0)
 IRQ_HANDLER(isr_keyboard, keyboard_handler, 1)
+
+#define IRQ_HANDLER_GENERIC(n, irq_num)                                        \
+    __attribute__((naked)) void n()                                            \
+    {                                                                          \
+        __asm__ volatile("push %rdi\n"                                         \
+                         "push %rsi\n"                                         \
+                         "push %rdx\n"                                         \
+                         "push %rcx\n"                                         \
+                         "push %rbx\n"                                         \
+                         "push %rax\n"                                         \
+                         "push %rbp\n"                                         \
+                         "push %r8\n"                                          \
+                         "push %r9\n"                                          \
+                         "push %r10\n"                                         \
+                         "push %r11\n"                                         \
+                         "push %r12\n"                                         \
+                         "push %r13\n"                                         \
+                         "push %r14\n"                                         \
+                         "push %r15\n"                                         \
+                         "mov $" #irq_num ", %rdi\n"                           \
+                         "call irq_dispatch\n"                                 \
+                         "movb $" #irq_num ", %al\n"                           \
+                         "call pic_sendEOI\n"                                  \
+                         "pop %r15\n"                                          \
+                         "pop %r14\n"                                          \
+                         "pop %r13\n"                                          \
+                         "pop %r12\n"                                          \
+                         "pop %r11\n"                                          \
+                         "pop %r10\n"                                          \
+                         "pop %r9\n"                                           \
+                         "pop %r8\n"                                           \
+                         "pop %rbp\n"                                          \
+                         "pop %rax\n"                                          \
+                         "pop %rbx\n"                                          \
+                         "pop %rcx\n"                                          \
+                         "pop %rdx\n"                                          \
+                         "pop %rsi\n"                                          \
+                         "pop %rdi\n"                                          \
+                         "iretq\n");                                           \
+    }
+
+IRQ_HANDLER_GENERIC(isr_irq2, 2)
+IRQ_HANDLER_GENERIC(isr_irq3, 3)
+IRQ_HANDLER_GENERIC(isr_irq4, 4)
+IRQ_HANDLER_GENERIC(isr_irq5, 5)
+IRQ_HANDLER_GENERIC(isr_irq6, 6)
+IRQ_HANDLER_GENERIC(isr_irq7, 7)
+IRQ_HANDLER_GENERIC(isr_irq8, 8)
+IRQ_HANDLER_GENERIC(isr_irq9, 9)
+IRQ_HANDLER_GENERIC(isr_irq10, 10)
+IRQ_HANDLER_GENERIC(isr_irq11, 11)
+IRQ_HANDLER_GENERIC(isr_irq12, 12)
+IRQ_HANDLER_GENERIC(isr_irq13, 13)
+IRQ_HANDLER_GENERIC(isr_irq14, 14)
+IRQ_HANDLER_GENERIC(isr_irq15, 15)

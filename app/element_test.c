@@ -6,7 +6,7 @@
 #include <framebuffer.h>
 #include <keyboard.h>
 #include <limine_defs.h>
-#include <pit.h>
+#include <timer.h>
 
 void element_test()
 {
@@ -16,9 +16,9 @@ void element_test()
     fb_draw_rect(fb->width / 2 - 150, 100, 300, 50, 0xff0000);
 
     // circles
-    fb_draw_circle(fb->width / 2 - 150, fb->height / 3 * 2 + 100, 100, 0x00ff00,
+    fb_draw_circle(fb->width / 2 - 300, fb->height / 3 * 2 + 100, 100, 0x00ff00,
                    true);
-    fb_draw_circle(fb->width / 2 + 150, fb->height / 3 * 2 + 100, 100, 0x00ff00,
+    fb_draw_circle(fb->width / 2 + 300, fb->height / 3 * 2 + 100, 100, 0x00ff00,
                    false);
 
     // line
@@ -34,7 +34,7 @@ void element_test()
         fb_clear_region(x - radius, y - radius, x + radius + 1, y + radius + 1);
 #endif
         fb_draw_line(x, y, i, y - radius);
-        pit_wait_ms(interval);
+        wait_ms(interval);
     }
 
     // right
@@ -43,7 +43,7 @@ void element_test()
         fb_clear_region(x - radius, y - radius, x + radius + 1, y + radius + 1);
 #endif
         fb_draw_line(x, y, x + radius, i);
-        pit_wait_ms(interval);
+        wait_ms(interval);
     }
 
     // bottom
@@ -52,7 +52,7 @@ void element_test()
         fb_clear_region(x - radius, y - radius, x + radius + 1, y + radius + 1);
 #endif
         fb_draw_line(x, y, i, y + radius);
-        pit_wait_ms(interval);
+        wait_ms(interval);
     }
 
     // left
@@ -61,7 +61,7 @@ void element_test()
         fb_clear_region(x - radius, y - radius, x + radius + 1, y + radius + 1);
 #endif
         fb_draw_line(x, y, x - radius, i);
-        pit_wait_ms(interval);
+        wait_ms(interval);
     }
 
     while (kbd_get_key(true).scancode != KEY_ESC) {

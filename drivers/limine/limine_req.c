@@ -21,7 +21,3 @@ volatile struct limine_entry_point_request entry_point_request = {
 // Request a memory map.
 volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST_ID, .revision = 0, .response = NULL};
-
-// Request the higher-half direct map.
-volatile struct limine_hhdm_request hhdm_request = {
-    .id = LIMINE_HHDM_REQUEST_ID, .revision = 0, .response = NULL};

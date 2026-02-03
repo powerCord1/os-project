@@ -3,8 +3,8 @@
 #include <keyboard.h>
 #include <limine_defs.h>
 #include <math.h>
-#include <pit.h>
 #include <stdio.h>
+#include <timer.h>
 
 void random_test_main()
 {
@@ -19,6 +19,6 @@ void random_test_main()
                 fb_put_pixel(x, y, random_range(0, 0xFFFFFF));
             }
         }
-        pit_wait_ms(1);
+        wait_ms(1);
     }
 }

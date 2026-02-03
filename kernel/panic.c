@@ -23,6 +23,6 @@ __attribute__((noreturn)) void panic(const char *reason)
 #else
     printf("Press any key to reboot");
     kbd_poll_key();
-    reboot();
+    sys_reset();
 #endif
 }

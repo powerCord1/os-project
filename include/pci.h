@@ -16,9 +16,16 @@ typedef struct {
     uint8_t device;
     uint8_t function;
 } pci_device_t;
-
+uint8_t pci_read_byte(uint8_t bus, uint8_t device, uint8_t function,
+                      uint8_t offset);
+uint16_t pci_read_word(uint8_t bus, uint8_t device, uint8_t function,
+                       uint8_t offset);
 uint32_t pci_read_dword(uint8_t bus, uint8_t device, uint8_t function,
                         uint8_t offset);
+void pci_write_byte(uint8_t bus, uint8_t device, uint8_t function,
+                    uint8_t offset, uint8_t value);
+void pci_write_word(uint8_t bus, uint8_t device, uint8_t function,
+                    uint8_t offset, uint16_t value);
 void pci_write_dword(uint8_t bus, uint8_t device, uint8_t function,
                      uint8_t offset, uint32_t value);
 

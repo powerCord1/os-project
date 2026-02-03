@@ -14,9 +14,10 @@
 #include <sound.h>
 #include <stdio.h>
 #include <string.h>
+#include <timer.h>
 
-#define TITLE_HEIGHT 3
-#define OPTIMISATION_ENABLED 0
+#define DEFAULT_TITLE_HEIGHT 3
+#define OPTIMISE_FB false
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
@@ -132,9 +133,9 @@ void bell()
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
-#if !OPTIMISATION_ENABLED
+#if !OPTIMISE_FB
     if (x >= fb->width || y >= fb->height) {
-        log_err(
+        log_warn(
             "tried to plot pixel outside of framebuffer boundaries: x=%d, y=%d",
             x, y);
         return;
@@ -273,7 +274,7 @@ void fb_clear_line(uint32_t line_num)
 
 void fb_clear_vp()
 {
-    const uint32_t title_height_pixels = char_height * TITLE_HEIGHT;
+    const uint32_t title_height_pixels = char_height * DEFAULT_TITLE_HEIGHT;
     fb_clear_region(0, title_height_pixels, fb->width,
                     fb->height - title_height_pixels);
     fb_set_cursor(0, title_height_pixels + char_height);
@@ -604,15 +605,20 @@ void fb_draw_title(const char *title)
     fb_set_color(0, 0xffffff);
 
     // draw white block
-    fb_draw_rect(0, 0, fb->width, char_height * TITLE_HEIGHT, 0xffffff);
+    fb_draw_rect(0, 0, fb->width, char_height * DEFAULT_TITLE_HEIGHT, 0xffffff);
 
     // draw text in middle of block
-    fb_set_cursor(0, TITLE_HEIGHT / 2 * char_height);
+    fb_set_cursor(0, DEFAULT_TITLE_HEIGHT / 2 * char_height);
     fb_print_centered(title);
 
     // set cursor after title
-    fb_set_cursor(0, char_height * (TITLE_HEIGHT + 1));
+    fb_set_cursor(0, char_height * (DEFAULT_TITLE_HEIGHT + 1));
 
     // restore settings
     fb_reset_color();
+}
+
+void wait_for_render()
+{
+    wait_ms(100);
 }

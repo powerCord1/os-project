@@ -7,6 +7,7 @@
 #include <serial.h>
 #include <stdio.h>
 #include <tty.h>
+#include <verinfo.h>
 
 static void write_log(uint8_t type, const char *color, const char *format,
                       va_list args)
@@ -95,6 +96,11 @@ void log_kbd_action(const char *format, ...)
 
 void print_build_info()
 {
-    printf("Build version: %s\nBuild time: %s\nCommit: %s\n", BUILD_VERSION,
-           BUILD_TIME, COMMIT);
+    printf("Build version: %s\nBuild time: %s\nCommit: %s\n", verinfo.version,
+           verinfo.buildtime, verinfo.commit);
+}
+
+void empty_function()
+{
+    __asm__("nop");
 }

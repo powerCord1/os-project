@@ -10,7 +10,7 @@ void bmp_test_main()
 {
     image_t *image = bmp_load(test_bmp);
     if (!image) {
-        log_err("Failed to load BMP image.\n");
+        log_err("Failed to load BMP image");
         return;
     }
 

@@ -3,6 +3,7 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
+#include <fs.h>
 #include <interrupts.h>
 #include <io.h>
 #include <pit.h>
@@ -26,7 +27,7 @@ __attribute__((noreturn)) void reboot()
     printf("Rebooting...");
     log_info("Rebooting...");
     wait_for_render();
-    disable_interrupts();
+    do_shutdown_calls();
 
     sys_reset();
 
@@ -38,27 +39,30 @@ __attribute__((noreturn)) void reboot()
     halt_cf();
 }
 
-void sys_reset()
-{
-    outb(0x64, 0xFE);
-}
-
 __attribute__((noreturn)) void shutdown()
 {
     fb_clear();
     printf("Shutting down...");
     log_info("Shutting down...");
     wait_for_render();
-    disable_interrupts();
+    do_shutdown_calls();
 
     sys_poweroff();
 
-    // system should have powered off by now, in case it hasn't, show a message
+    // System should have powered off by now, in case it hasn't, show a message
     fb_clear();
     printf("System was unable to shut down\n"
            "Please manually power off the system by pressing the power "
            "button.");
     halt_cf();
+}
+
+void do_shutdown_calls()
+{
+    disable_interrupts();
+    if (!fat32_unmount()) {
+        log_err("Failed to unmount filesystems");
+    }
 }
 
 void sys_poweroff()
@@ -68,9 +72,12 @@ void sys_poweroff()
     outw(SHUTDOWN_PORT_VBOX, SHUTDOWN_SIG_VBOX);   // vbox
     outw(SHUTDOWN_PORT_CLOUD_HYPERVISOR,
          SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
+
+    // TODO: implement ACPI shutdow
 }
 
-void wait_for_render()
+void sys_reset()
 {
-    pit_wait_ms(100);
+    // TODO: implement ACPI reboot
+    outb(0x64, 0xFE);
 }

@@ -2,9 +2,9 @@
 #include <heap.h>
 #include <nvme.h>
 #include <pci.h>
-#include <pit.h>
 #include <stdio.h>
 #include <string.h>
+#include <timer.h>
 
 static nvme_controller_t controller;
 
@@ -41,7 +41,7 @@ static bool nvme_submit_admin_command(nvme_cmd_t *cmd)
 
             return true;
         }
-        pit_wait_ms(1);
+        wait_ms(1);
     }
 
     log_err("NVMe admin command timed out");
@@ -116,7 +116,7 @@ static bool nvme_submit_io_command(nvme_cmd_t *cmd)
 
             return true;
         }
-        pit_wait_ms(1);
+        wait_ms(1);
     }
 
     log_err("NVMe I/O command timed out");
@@ -264,7 +264,7 @@ void nvme_init(disk_driver_t *driver)
     // Disable controller
     controller.regs->cc = 0;
     while (controller.regs->csts & CSTS_RDY) {
-        pit_wait_ms(1);
+        wait_ms(1);
     }
 
     // Setup Admin Queues
@@ -313,7 +313,7 @@ void nvme_init(disk_driver_t *driver)
         if (controller.regs->csts & CSTS_RDY) {
             break;
         }
-        pit_wait_ms(1);
+        wait_ms(1);
     }
 
     if (!(controller.regs->csts & CSTS_RDY)) {

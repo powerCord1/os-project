@@ -41,7 +41,7 @@ static int check_type(hba_port_t *port)
     }
 }
 
-void probe_port(hba_mem_t *ab, disk_driver_t *driver)
+static void probe_port(hba_mem_t *ab, disk_driver_t *driver)
 {
     uint32_t pi = ab->pi;
     int i = 0;
@@ -79,7 +79,9 @@ void sata_init(disk_driver_t *driver)
         return;
     }
 
-    abar = (hba_mem_t *)((uintptr_t)pci_get_bar_address(&ahci_dev, 5));
+    uintptr_t abar_phys = pci_get_bar_address(&ahci_dev, 5);
+    abar = (hba_mem_t *)abar_phys;
+
     log_info("SATA: AHCI controller found at 0x%x", abar);
 
     probe_port(abar, driver);

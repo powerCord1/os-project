@@ -14,6 +14,7 @@
 #include <panic.h>
 #include <pic.h>
 #include <pit.h>
+#include <prediction.h>
 #include <stdio.h>
 #include <string.h>
 #include <tty.h>
@@ -22,6 +23,41 @@
 
 idt_entry_t idt[IDT_ENTRIES];
 idtr_t idtr;
+
+void irq_dispatch(uint8_t irq)
+{
+    if (irq < 16 && irq_handlers[irq].handler) {
+        irq_handlers[irq].handler(irq_handlers[irq].ctx);
+    } else {
+        log_warn("irq_dispatch: Tried to call invalid IRQ: %d", irq);
+    }
+}
+
+void irq_install_handler(uint8_t irq, void (*handler)(void *), void *ctx)
+{
+    if (irq < 16) {
+        irq_handlers[irq].handler = handler;
+        irq_handlers[irq].ctx = ctx;
+        irq_clear_mask(irq);
+    }
+}
+
+// void irq_uninstall_handler()
+
+extern void isr_irq2();
+extern void isr_irq3();
+extern void isr_irq4();
+extern void isr_irq5();
+extern void isr_irq6();
+extern void isr_irq7();
+extern void isr_irq8();
+extern void isr_irq9();
+extern void isr_irq10();
+extern void isr_irq11();
+extern void isr_irq12();
+extern void isr_irq13();
+extern void isr_irq14();
+extern void isr_irq15();
 
 void enable_interrupts()
 {
@@ -35,11 +71,11 @@ void disable_interrupts()
 
 bool are_interrupts_enabled()
 {
-    unsigned long flags;
-    __asm__ volatile("pushf\n\t"
+    uint64_t flags;
+    __asm__ volatile("pushfq\n\t"
                      "pop %0"
-                     : "=g"(flags));
-    return flags & (1 << 9);
+                     : "=rm"(flags));
+    return (flags >> 9) & 1;
 }
 
 void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
@@ -103,29 +139,29 @@ void idt_init()
         // interrupts
         &isr_pit,
         &isr_keyboard,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
+        &isr_irq2,
+        &isr_irq3,
+        &isr_irq4,
+        &isr_irq5,
+        &isr_irq6,
+        &isr_irq7,
+        &isr_irq8,
+        &isr_irq9,
+        &isr_irq10,
+        &isr_irq11,
+        &isr_irq12,
+        &isr_irq13,
+        &isr_irq14,
+        &isr_irq15,
     };
 
     log_verbose("Setting IDT descriptors");
     for (size_t i = 0; i < VECTOR_TABLE_SIZE; i++) {
-        log_verbose("Setting descriptor %d", i);
         if (i >= IDT_ENTRIES) {
-            panic("vector table too large for IDT");
+            panic("Vector table too large for IDT");
         }
         idt_set_descriptor(i, vector_table[i], 0x8E);
+        io_wait(); // Prevent synchronisation issues
     }
 
     log_verbose("Loading IDT");
@@ -135,6 +171,8 @@ void idt_init()
     log_verbose("Clearing PIC masks");
     irq_clear_mask(IRQ_TYPE_PIT);
     irq_clear_mask(IRQ_TYPE_KEYBOARD);
+    enable_interrupts();
+    check_interrupts();
 }
 
 void idt_load()
@@ -142,15 +180,21 @@ void idt_load()
     __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
 }
 
-void wait_for_interrupt()
+void check_interrupts()
 {
+    // Check if interrupts are enabled after running sti
+    if (unlikely(!are_interrupts_enabled())) {
+        panic("Failed to enable interrupts");
+    }
+
+    // Check if the system is receiving interrupts
     uint64_t i = 0;
     uint64_t init_pit_ticks = pit_ticks;
     while (pit_ticks == init_pit_ticks) {
-        // TODO: panic after 2 seconds by getting CMOS info, as CPU speed can
+        // TODO: panic after 2 seconds by getting timestamp, as CPU speed can
         // change
         if (++i == 10000000000) {
-            panic("Timed out while waiting for interrupt");
+            panic("Interrupt check timed out");
         }
     }
 }

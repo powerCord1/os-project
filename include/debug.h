@@ -19,6 +19,7 @@ void log_test();
 void log_kbd_action(const char *format, ...);
 void print_build_info();
 void breakpoint();
+void empty_function();
 
 struct ansi_colors {
     const char *nc;

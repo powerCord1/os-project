@@ -7,6 +7,7 @@
 #include <keyboard.h>
 #include <pit.h>
 #include <sound.h>
+#include <timer.h>
 
 static volatile bool pit_beep_requested = false;
 static volatile uint32_t pit_beep_request_freq;
@@ -41,7 +42,7 @@ void nosound()
 void beep(uint32_t freq)
 {
     play_sound(freq);
-    pit_wait_ms(20);
+    wait_ms(20);
     nosound();
 }
 
@@ -52,7 +53,7 @@ void sound_test()
             break;
         }
         play_sound(i);
-        pit_wait_ms(1);
+        wait_ms(1);
     }
     nosound();
 }

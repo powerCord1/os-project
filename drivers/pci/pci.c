@@ -2,34 +2,59 @@
 #include <io.h>
 #include <pci.h>
 
+static uint32_t pci_get_config_address(uint8_t bus, uint8_t device,
+                                       uint8_t function, uint8_t offset)
+{
+    return (uint32_t)(((uint32_t)bus << 16) | ((uint32_t)device << 11) |
+                      ((uint32_t)function << 8) | (offset & 0xfc) | 0x80000000);
+}
+
 uint32_t pci_read_dword(uint8_t bus, uint8_t device, uint8_t function,
                         uint8_t offset)
 {
-    uint32_t address;
-    uint32_t lbus = (uint32_t)bus;
-    uint32_t ldevice = (uint32_t)device;
-    uint32_t lfunction = (uint32_t)function;
-
-    address = (uint32_t)((lbus << 16) | (ldevice << 11) | (lfunction << 8) |
-                         (offset & 0xfc) | 0x80000000);
-
-    outl(PCI_CONFIG_ADDRESS, address);
+    outl(PCI_CONFIG_ADDRESS,
+         pci_get_config_address(bus, device, function, offset));
     return inl(PCI_CONFIG_DATA);
 }
 
 void pci_write_dword(uint8_t bus, uint8_t device, uint8_t function,
                      uint8_t offset, uint32_t value)
 {
-    uint32_t address;
-    uint32_t lbus = (uint32_t)bus;
-    uint32_t ldevice = (uint32_t)device;
-    uint32_t lfunction = (uint32_t)function;
-
-    address = (uint32_t)((lbus << 16) | (ldevice << 11) | (lfunction << 8) |
-                         (offset & 0xfc) | 0x80000000);
-
-    outl(PCI_CONFIG_ADDRESS, address);
+    outl(PCI_CONFIG_ADDRESS,
+         pci_get_config_address(bus, device, function, offset));
     outl(PCI_CONFIG_DATA, value);
+}
+
+uint16_t pci_read_word(uint8_t bus, uint8_t device, uint8_t function,
+                       uint8_t offset)
+{
+    outl(PCI_CONFIG_ADDRESS,
+         pci_get_config_address(bus, device, function, offset));
+    return inw(PCI_CONFIG_DATA + (offset & 2));
+}
+
+uint8_t pci_read_byte(uint8_t bus, uint8_t device, uint8_t function,
+                      uint8_t offset)
+{
+    outl(PCI_CONFIG_ADDRESS,
+         pci_get_config_address(bus, device, function, offset));
+    return inb(PCI_CONFIG_DATA + (offset & 3));
+}
+
+void pci_write_word(uint8_t bus, uint8_t device, uint8_t function,
+                    uint8_t offset, uint16_t value)
+{
+    outl(PCI_CONFIG_ADDRESS,
+         pci_get_config_address(bus, device, function, offset));
+    outw(PCI_CONFIG_DATA + (offset & 2), value);
+}
+
+void pci_write_byte(uint8_t bus, uint8_t device, uint8_t function,
+                    uint8_t offset, uint8_t value)
+{
+    outl(PCI_CONFIG_ADDRESS,
+         pci_get_config_address(bus, device, function, offset));
+    outb(PCI_CONFIG_DATA + (offset & 3), value);
 }
 
 uint16_t pci_get_vendor_id(uint8_t bus, uint8_t device, uint8_t function)

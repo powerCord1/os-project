@@ -14,7 +14,6 @@ static double reduce_angle(double angle)
     return angle;
 }
 
-// sin implementation using Taylor series expansion
 double sin(double x)
 {
     x = reduce_angle(x);
@@ -32,7 +31,6 @@ double sin(double x)
     return result;
 }
 
-// cos implementation using sin()
 double cos(double x)
 {
     return sin(M_PI / 2.0 - x);

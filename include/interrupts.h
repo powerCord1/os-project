@@ -1,10 +1,19 @@
 #include <stdbool.h>
+#include <stdint.h>
 
 void idt_init();
 void enable_interrupts();
 void disable_interrupts();
 bool are_interrupts_enabled();
-void wait_for_interrupt();
+void check_interrupts();
+void irq_install_handler(uint8_t irq, void (*handler)(void *), void *ctx);
+
+struct irq_handler_entry {
+    void (*handler)(void *);
+    void *ctx;
+};
+
+static struct irq_handler_entry irq_handlers[16];
 
 enum irq_types {
     IRQ_TYPE_PIT = 0,

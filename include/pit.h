@@ -10,5 +10,6 @@
 extern volatile uint64_t pit_ticks;
 
 void pit_init();
+
+// This gets called when a PIT interrupt is received
 void pit_handler();
-void pit_wait_ms(size_t ticks);

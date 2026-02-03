@@ -10,6 +10,7 @@ void *memset(void *s, int c, size_t n);
 size_t strlen(const char *str);
 char *strcpy(char *dest, const char *src);
 char *strdup(const char *s);
+char *strndup(const char *s, size_t n);
 int strcmp(const char *s1, const char *s2);
 int strcasecmp(const char *s1, const char *s2);
 char *strchr(const char *s, int c);
