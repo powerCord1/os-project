@@ -24,8 +24,8 @@ void cpu_init()
 {
     log_verbose("Enabling SIMD extensions");
     sse_init();
-    tsc_init();
     enable_a20();
+    enable_mce();
 }
 
 void halt()
@@ -54,24 +54,27 @@ void idle()
 
 bool is_pe_enabled()
 {
-    uint64_t cr0;
-    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
-    return (cr0 & 1);
+    return get_cr0().bit_list.pe;
 }
 
 void sse_init()
 {
-    uint64_t cr0;
-    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
-    cr0 &= ~(1 << 2); // Clear EM bit
-    cr0 |= (1 << 1);  // Set MP bit
-    __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
+    cr0_t cr0 = get_cr0();
+    cr0.bit_list.em = 0;
+    cr0.bit_list.mp = 1;
+    set_cr0(cr0);
 
-    uint64_t cr4;
-    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
-    cr4 |= (1 << 9);  // Set OSFXSR bit
-    cr4 |= (1 << 10); // Set OSXMMEXCPT bit
-    __asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
+    cr4_t cr4 = get_cr4();
+    cr4.bit_list.osfxsr = 1;
+    cr4.bit_list.osxmmexcpt = 1;
+    set_cr4(cr4);
+}
+
+void enable_mce()
+{
+    cr4_t cr4 = get_cr4();
+    cr4.bit_list.mce = 1;
+    set_cr4(cr4);
 }
 
 bool is_apic_enabled()
@@ -81,7 +84,7 @@ bool is_apic_enabled()
     return (edx & (1 << 9));
 }
 
-static void tsc_init()
+void tsc_init()
 {
     unsigned int eax, ebx, ecx, edx;
     __cpuid(0, eax, ebx, ecx, edx);
@@ -176,3 +179,68 @@ void enable_a20()
         outb(0x92, a20_status);
     }
 }
+
+#define SET_CR_STUB(cr_name, type)                                             \
+    void set_##cr_name(type val)                                               \
+    {                                                                          \
+        __asm__ volatile("mov %0, %%" #cr_name : : "r"(val.raw) : "memory");   \
+    }
+
+#define GET_CR_STUB(cr_name, type)                                             \
+    type get_##cr_name()                                                       \
+    {                                                                          \
+        type val;                                                              \
+        __asm__ volatile("mov %%" #cr_name ", %0" : "=r"(val.raw));            \
+        return val;                                                            \
+    }
+
+GET_CR_STUB(cr0, cr0_t)
+GET_CR_STUB(cr4, cr4_t)
+SET_CR_STUB(cr0, cr0_t)
+SET_CR_STUB(cr4, cr4_t)
+
+cr2_t get_cr2()
+{
+    cr2_t val;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(val));
+    return val;
+}
+
+void set_cr2(cr2_t val)
+{
+    __asm__ volatile("mov %0, %%cr2" : : "r"(val) : "memory");
+}
+
+cr3_t get_cr3()
+{
+    cr3_t val;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(val));
+    return val;
+}
+
+void set_cr3(cr3_t val)
+{
+    __asm__ volatile("mov %0, %%cr3" : : "r"(val) : "memory");
+}
+
+rflags_t get_rflags()
+{
+    rflags_t rflags;
+    __asm__ volatile("pushfq\n\t"
+                     "pop %0"
+                     : "=rm"(rflags.raw));
+    return rflags;
+}
+
+void set_rflags(rflags_t rflags)
+{
+    __asm__ volatile("push %0\n\t"
+                     "popfq"
+                     :
+                     : "rm"(rflags.raw));
+}
+
+#undef SET_CR_STUB
+#undef GET_CR_STUB
+
+// TODO: make a function to get and set cr value to prevent repetitive code

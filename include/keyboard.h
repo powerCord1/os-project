@@ -9,6 +9,7 @@
 #define KBD_CMD_PORT 0x64
 
 #define KBD_LED_CMD 0xED
+#define KBD_TYPM_CMD 0xF3
 
 #define KBD_DEFAULT_TYPM_RATE 0
 #define KBD_DEFAULT_TYPM_DELAY 0
@@ -33,7 +34,7 @@ extern kbd_modifiers_t kbd_modifiers;
 extern bool keyboard_logging_enabled;
 
 uint8_t get_key();
-void keyboard_handler();
+uint64_t keyboard_handler(uint64_t rsp);
 
 enum scancode_1 {
     KEY_ESC = 0x01,
@@ -185,7 +186,8 @@ static const char scancode_map[256] = {
 };
 
 void kbd_init();
-void kbd_set_leds();
+void kbd_update_leds();
+void kbd_send_led_cmd(uint8_t data);
 void kbd_set_typematic_rate(uint8_t rate, uint8_t delay);
 key_t kbd_get_key(bool);
 bool kbd_is_modifier_key(uint8_t scancode);
@@ -193,3 +195,4 @@ char kbd_capitalise(char c);
 void kbd_dump_modifiers();
 void wait_for_kbd();
 uint8_t kbd_poll_key();
+void kbd_test_leds();

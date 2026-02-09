@@ -31,5 +31,6 @@
             "binaryPath": "/run/media/lewis/OS/src/os_dev/build/os.bin",
             "binaryArgs": []
         }
-    ]
+    ],
+    "git-blame.configs.statusBar.length": "short"
 }

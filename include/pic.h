@@ -17,3 +17,7 @@ void irq_set_mask(uint8_t IRQline);
 
 // Clear an IRQ mask
 void irq_clear_mask(uint8_t IRQline);
+
+void irq_mask_all();
+
+void irq_unmask_all();

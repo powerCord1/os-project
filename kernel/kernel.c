@@ -10,14 +10,13 @@
 #include <interrupts.h>
 #include <keyboard.h>
 #include <menu.h>
+#include <menus.h>
 #include <multiboot2.h>
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
+#include <scheduler.h>
 #include <stdio.h>
-
-void main_menu();
-void power_menu();
 
 void main(unsigned long magic, unsigned long addr)
 {

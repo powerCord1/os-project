@@ -5,6 +5,7 @@
 #include <cpu.h>
 #include <debug.h>
 #include <gdt.h>
+#include <heap.h>
 #include <idt.h>
 #include <init.h>
 #include <interrupts.h>
@@ -24,26 +25,78 @@
 idt_entry_t idt[IDT_ENTRIES];
 idtr_t idtr;
 
-void irq_dispatch(uint8_t irq)
+static struct irq_handler_entry *irq_handlers[16];
+
+uint64_t irq_dispatch(uint64_t rsp, uint8_t irq)
 {
-    if (irq < 16 && irq_handlers[irq].handler) {
-        irq_handlers[irq].handler(irq_handlers[irq].ctx);
+    if (irq < 16) {
+        struct irq_handler_entry *handler = irq_handlers[irq];
+        while (handler) {
+            if (handler->handler) {
+                rsp = handler->handler(rsp, handler->ctx);
+            }
+            handler = handler->next;
+        }
     } else {
         log_warn("irq_dispatch: Tried to call invalid IRQ: %d", irq);
     }
+    return rsp;
 }
 
-void irq_install_handler(uint8_t irq, void (*handler)(void *), void *ctx)
+void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx)
 {
     if (irq < 16) {
-        irq_handlers[irq].handler = handler;
-        irq_handlers[irq].ctx = ctx;
+        struct irq_handler_entry *new_handler =
+            malloc(sizeof(struct irq_handler_entry));
+        if (!new_handler) {
+            panic("Failed to allocate memory for IRQ handler");
+        }
+
+        new_handler->handler = handler;
+        new_handler->ctx = ctx;
+        new_handler->next = NULL;
+
+        if (irq_handlers[irq] == NULL) {
+            irq_handlers[irq] = new_handler;
+        } else {
+            struct irq_handler_entry *current = irq_handlers[irq];
+            while (current->next) {
+                current = current->next;
+            }
+            current->next = new_handler;
+        }
         irq_clear_mask(irq);
     }
 }
 
-// void irq_uninstall_handler()
+void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx)
+{
+    if (irq < 16) {
+        struct irq_handler_entry *current = irq_handlers[irq];
+        struct irq_handler_entry *prev = NULL;
 
+        while (current) {
+            if (current->handler == handler && current->ctx == ctx) {
+                if (prev) {
+                    prev->next = current->next;
+                } else {
+                    irq_handlers[irq] = current->next;
+                }
+                free(current);
+                break;
+            }
+            prev = current;
+            current = current->next;
+        }
+
+        if (irq_handlers[irq] == NULL) {
+            irq_set_mask(irq);
+        }
+    }
+}
+
+extern void isr_irq0();
+extern void isr_irq1();
 extern void isr_irq2();
 extern void isr_irq3();
 extern void isr_irq4();
@@ -94,6 +147,10 @@ void idt_set_descriptor(uint8_t vector, void *isr, uint8_t flags)
 
 void idt_init()
 {
+    for (int i = 0; i < 16; i++) {
+        irq_handlers[i] = NULL;
+    }
+
     if (is_apic_enabled()) {
         log_verbose("APIC enabled");
     }
@@ -137,8 +194,8 @@ void idt_init()
         &isr_unhandled,
 
         // interrupts
-        &isr_pit,
-        &isr_keyboard,
+        &isr_irq0,
+        &isr_irq1,
         &isr_irq2,
         &isr_irq3,
         &isr_irq4,
@@ -168,33 +225,15 @@ void idt_init()
     idt_load();
     log_verbose("Initialising PIC");
     pic_init();
-    log_verbose("Clearing PIC masks");
-    irq_clear_mask(IRQ_TYPE_PIT);
-    irq_clear_mask(IRQ_TYPE_KEYBOARD);
     enable_interrupts();
-    check_interrupts();
+
+    // Check if interrupts are enabled after running sti
+    if (unlikely(!are_interrupts_enabled())) {
+        panic("Failed to enable interrupts");
+    }
 }
 
 void idt_load()
 {
     __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
-}
-
-void check_interrupts()
-{
-    // Check if interrupts are enabled after running sti
-    if (unlikely(!are_interrupts_enabled())) {
-        panic("Failed to enable interrupts");
-    }
-
-    // Check if the system is receiving interrupts
-    uint64_t i = 0;
-    uint64_t init_pit_ticks = pit_ticks;
-    while (pit_ticks == init_pit_ticks) {
-        // TODO: panic after 2 seconds by getting timestamp, as CPU speed can
-        // change
-        if (++i == 10000000000) {
-            panic("Interrupt check timed out");
-        }
-    }
 }

@@ -4,11 +4,13 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
+#include <interrupts.h>
 #include <io.h>
 #include <keyboard.h>
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
+#include <timer.h>
 
 static volatile char last_char = 0;
 static volatile char last_scancode = 0;
@@ -23,11 +25,12 @@ void kbd_init()
     keyboard_logging_enabled = KBD_LOG_DEFAULT;
     log_verbose("Keyboard logging is %s",
                 keyboard_logging_enabled ? "enabled" : "disabled");
-    log_verbose("Setting keyboard LED state");
-    kbd_set_leds();
+    log_verbose("Setting keyboard LEDs");
+    kbd_update_leds();
     log_verbose("Setting typematic rate, rate: %d, delay: %d",
                 KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
     kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
+    irq_install_handler(IRQ_TYPE_KEYBOARD, (uint64_t (*)(uint64_t, void *))keyboard_handler, NULL);
 }
 
 uint8_t get_key()
@@ -35,7 +38,7 @@ uint8_t get_key()
     return inb(KBD_DATA_PORT);
 }
 
-void kbd_set_leds()
+void kbd_update_leds()
 {
     uint8_t data = 0;
     if (kbd_modifiers.scroll_lock) {
@@ -47,7 +50,10 @@ void kbd_set_leds()
     if (kbd_modifiers.caps_lock) {
         data |= 4;
     }
+}
 
+void kbd_send_led_cmd(uint8_t data)
+{
     wait_for_kbd();
     outb(KBD_DATA_PORT, KBD_LED_CMD);
     wait_for_kbd();
@@ -66,7 +72,7 @@ void kbd_set_typematic_rate(uint8_t rate, uint8_t delay)
     uint8_t data = (delay << 5) | rate;
 
     wait_for_kbd();
-    outb(KBD_DATA_PORT, 0xF3); // Set typematic rate command
+    outb(KBD_DATA_PORT, KBD_TYPM_CMD); // Set typematic rate command
     wait_for_kbd();
     outb(KBD_DATA_PORT, data);
 }
@@ -77,7 +83,7 @@ void wait_for_kbd()
         ;
 }
 
-void keyboard_handler()
+uint64_t keyboard_handler(uint64_t rsp)
 {
     uint8_t key = get_key();
 
@@ -101,7 +107,7 @@ void keyboard_handler()
         switch (key) {
         case KEY_CAPSLOCK:
             kbd_modifiers.caps_lock = !kbd_modifiers.caps_lock;
-            kbd_set_leds();
+            kbd_update_leds();
             break;
         case KEY_SHIFT_LEFT:
         case KEY_SHIFT_RIGHT:
@@ -143,6 +149,8 @@ void keyboard_handler()
             break;
         }
     }
+
+    return rsp;
 }
 
 key_t kbd_get_key(bool wait)
@@ -207,5 +215,25 @@ uint8_t kbd_poll_key()
                 return scancode;
             }
         }
+    }
+}
+
+void kbd_test_leds()
+{
+    while (kbd_get_key(false).key != KEY_ESC) {
+        kbd_modifiers.caps_lock = true;
+        kbd_update_leds();
+        wait_ms(250);
+        kbd_modifiers.caps_lock = false;
+        kbd_modifiers.num_lock = true;
+        kbd_update_leds();
+        wait_ms(250);
+        kbd_modifiers.num_lock = false;
+        kbd_modifiers.scroll_lock = true;
+        kbd_update_leds();
+        wait_ms(250);
+        kbd_modifiers.scroll_lock = false;
+        kbd_update_leds();
+        wait_ms(250);
     }
 }

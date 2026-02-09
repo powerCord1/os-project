@@ -1,4 +1,4 @@
 #define HALT_ON_PANIC false
-#define CLEAR_ON_PANIC true
+#define CLEAR_ON_PANIC false
 
 void __attribute__((noreturn)) panic(const char *reason);

@@ -98,13 +98,11 @@ void cmd_sysinfo(int argc, char **argv)
 {
     printf("System information:\n");
 
-    uint64_t cr0, cr2, cr3, cr4, rflags;
-
-    asm volatile("mov %%cr0, %0" : "=r"(cr0));
-    asm volatile("mov %%cr2, %0" : "=r"(cr2));
-    asm volatile("mov %%cr3, %0" : "=r"(cr3));
-    asm volatile("mov %%cr4, %0" : "=r"(cr4));
-    asm volatile("pushfq; popq %0" : "=r"(rflags));
+    uint64_t cr0 = get_cr0().raw;
+    uint64_t cr2 = get_cr2();
+    uint64_t cr3 = get_cr3();
+    uint64_t cr4 = get_cr4().raw;
+    uint64_t rflags = get_rflags().raw;
 
     printf("CR0:    0x%016lx\n", cr0);
     printf("CR2:    0x%016lx\n", cr2);

@@ -67,13 +67,7 @@ void pic_init()
     outb(PIC2_DATA, ICW4_8086);
     io_wait();
 
-    // mask all interrupts
-    outb(PIC1_DATA, 0xFF);
-    outb(PIC2_DATA, 0xFF);
-
-    // enable PICs
-    outb(PIC1_DATA, 0x00);
-    outb(PIC2_DATA, 0x00);
+    irq_mask_all();
 }
 
 void pic_disable()
@@ -110,4 +104,16 @@ void irq_clear_mask(uint8_t IRQline)
     }
     value = inb(port) & ~(1 << IRQline);
     outb(port, value);
+}
+
+void irq_mask_all()
+{
+    outb(PIC1_DATA, 0xff);
+    outb(PIC2_DATA, 0xff);
+}
+
+void irq_unmask_all()
+{
+    outb(PIC1_DATA, 0x00);
+    outb(PIC2_DATA, 0x00);
 }

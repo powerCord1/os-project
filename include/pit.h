@@ -11,5 +11,9 @@ extern volatile uint64_t pit_ticks;
 
 void pit_init();
 
-// This gets called when a PIT interrupt is received
-void pit_handler();
+// PIT interrupt handler
+uint64_t pit_handler(uint64_t rsp);
+
+// Verify the PIT is sending interrupts, and the CPU is
+// correctly handling them
+void pit_check();

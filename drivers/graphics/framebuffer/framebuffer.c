@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <array.h>
 #include <debug.h>
 #include <font.h>
 #include <framebuffer.h>
@@ -11,6 +12,7 @@
 #include <limine_defs.h>
 #include <math.h>
 #include <panic.h>
+#include <prediction.h>
 #include <sound.h>
 #include <stdio.h>
 #include <string.h>
@@ -54,6 +56,11 @@ void fb_init()
 
     cursor.x = 0;
     cursor.y = 0;
+    memset(
+        cursor.under, 0,
+        ARRAY_SIZE(
+            cursor.under)); // Shouldn't it be just sizeof(cursor.under)? I seem
+                            // to be getting a triple fault when i do this
     cursor.visible = false;
 
     fb_is_initialised = true;
@@ -120,6 +127,16 @@ void fb_set_bg(uint32_t _bg)
     bg = _bg;
 }
 
+uint32_t fb_get_fg()
+{
+    return fg;
+}
+
+uint32_t fb_get_bg()
+{
+    return bg;
+}
+
 void fb_reset_color()
 {
     fg = default_fg;
@@ -134,10 +151,8 @@ void bell()
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
 #if !OPTIMISE_FB
-    if (x >= fb->width || y >= fb->height) {
-        log_warn(
-            "tried to plot pixel outside of framebuffer boundaries: x=%d, y=%d",
-            x, y);
+    if (unlikely_warn(x >= fb->width || y >= fb->height,
+                      "pixel out of bounds")) {
         return;
     }
 #endif
@@ -146,6 +161,12 @@ void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
 
 uint32_t fb_get_pixel(uint32_t x, uint32_t y)
 {
+#if !OPTIMISE_FB
+    if (unlikely_warn(x >= fb->width || y >= fb->height,
+                      "pixel out of bounds")) {
+        return 0;
+    }
+#endif
     return fb_ptr[y * pitch_in_pixels + x];
 }
 
@@ -533,23 +554,24 @@ void fb_putchar(char c)
         return;
     }
 
-    fb_erase_cursor();
+    // fb_erase_cursor();
 
-    if (!overwrite_mode &&
-        !fb_is_region_empty(
-            cursor.x, cursor.y, cursor.x + char_width, // is there a character
-            cursor.y + char_height)) { // in front of the cursor? this is ugly,
-                                       // make a text buffer at some point
-        log_kbd_action("shifting characters right");
-        for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
-            memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
-                    &fb_ptr[y * pitch_in_pixels + cursor.x],
-                    (fb->width - cursor.x - char_width) * sizeof(uint32_t));
-        }
-    } else {
-        // A printable character is being written, disable overwrite mode.
-        overwrite_mode = false;
-    }
+    // if (!overwrite_mode &&
+    //     !fb_is_region_empty(
+    //         cursor.x, cursor.y, cursor.x + char_width, // is there a
+    //         character cursor.y + char_height)) { // in front of the cursor?
+    //         this is ugly,
+    //                                    // make a text buffer at some point
+    //     log_kbd_action("shifting characters right");
+    //     for (uint32_t y = cursor.y; y < cursor.y + char_height; y++) {
+    //         memmove(&fb_ptr[y * pitch_in_pixels + cursor.x + char_width],
+    //                 &fb_ptr[y * pitch_in_pixels + cursor.x],
+    //                 (fb->width - cursor.x - char_width) * sizeof(uint32_t));
+    //     }
+    // } else {
+    //     // A printable character is being written, disable overwrite mode.
+    //     overwrite_mode = false;
+    // }
 
     fb_putchar_at(c, cursor.x, cursor.y);
     cursor.x += char_width;

@@ -94,7 +94,9 @@ ISR_STUB_ERR(security_protection, exceptions[22]);
                          "push %r13\n"                                         \
                          "push %r14\n"                                         \
                          "push %r15\n"                                         \
+                         "mov %rsp, %rdi\n"                                    \
                          "call " #handler "\n"                                 \
+                         "mov %rax, %rsp\n"                                    \
                          "movb $" #irq_num ", %al\n"                           \
                          "call pic_sendEOI\n"                                  \
                          "pop %r15\n"                                          \
@@ -136,8 +138,10 @@ IRQ_HANDLER(isr_keyboard, keyboard_handler, 1)
                          "push %r13\n"                                         \
                          "push %r14\n"                                         \
                          "push %r15\n"                                         \
-                         "mov $" #irq_num ", %rdi\n"                           \
+                         "mov %rsp, %rdi\n"                                    \
+                         "mov $" #irq_num ", %rsi\n"                           \
                          "call irq_dispatch\n"                                 \
+                         "mov %rax, %rsp\n"                                    \
                          "movb $" #irq_num ", %al\n"                           \
                          "call pic_sendEOI\n"                                  \
                          "pop %r15\n"                                          \
@@ -158,6 +162,8 @@ IRQ_HANDLER(isr_keyboard, keyboard_handler, 1)
                          "iretq\n");                                           \
     }
 
+IRQ_HANDLER_GENERIC(isr_irq0, 0)
+IRQ_HANDLER_GENERIC(isr_irq1, 1)
 IRQ_HANDLER_GENERIC(isr_irq2, 2)
 IRQ_HANDLER_GENERIC(isr_irq3, 3)
 IRQ_HANDLER_GENERIC(isr_irq4, 4)

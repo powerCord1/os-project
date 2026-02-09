@@ -13,6 +13,7 @@
 #include <keyboard.h>
 #include <limine.h>
 #include <pit.h>
+#include <scheduler.h>
 #include <serial.h>
 #include <stdio.h>
 #include <tty.h>
@@ -28,14 +29,16 @@ boot_task_t boot_tasks[] = {
     {.msg = "Send Limine requests", .func = limine_init},
     {.msg = "Init font", .func = font_init},
     {.msg = "Init framebuffer", .func = fb_init},
+    {.msg = "Init CPU Features", .func = cpu_init},
+    {.msg = "Init heap", .func = heap_init},
     {.msg = "Init GDT", .func = gdt_init},
     {.msg = "Init IDT", .func = idt_init},
     {.msg = "Init PIT", .func = pit_init},
-    {.msg = "Init CPU Features", .func = cpu_init},
-    {.msg = "Init heap", .func = heap_init},
+    {.msg = "Init TSC", .func = tsc_init},
     // {.msg = "Init ACPI", .func = acpi_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init keyboard", .func = kbd_init},
+    {.msg = "Init scheduler", .func = scheduler_init},
 };
 
 boot_task_t late_boot_tasks[] = {};
@@ -45,6 +48,7 @@ void sys_init()
     init_early();
     execute_tasks(boot_tasks, ARRAY_SIZE(boot_tasks));
     init_late();
+    scheduler_start();
 }
 
 void init_early()

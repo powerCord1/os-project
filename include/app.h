@@ -1,5 +1,5 @@
 /*
-    Definitions for main() functions in apps
+    Definitions for app main() functions
 */
 
 void typewriter_main();

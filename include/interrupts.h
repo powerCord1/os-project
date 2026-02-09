@@ -5,15 +5,15 @@ void idt_init();
 void enable_interrupts();
 void disable_interrupts();
 bool are_interrupts_enabled();
-void check_interrupts();
-void irq_install_handler(uint8_t irq, void (*handler)(void *), void *ctx);
+void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx);
+void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx);
+uint64_t irq_dispatch(uint64_t rsp, uint8_t irq);
 
 struct irq_handler_entry {
-    void (*handler)(void *);
+    uint64_t (*handler)(uint64_t, void *);
     void *ctx;
+    struct irq_handler_entry *next;
 };
-
-static struct irq_handler_entry irq_handlers[16];
 
 enum irq_types {
     IRQ_TYPE_PIT = 0,

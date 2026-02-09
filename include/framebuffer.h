@@ -19,6 +19,8 @@ extern bool fb_is_initialised;
 typedef struct {
     uint32_t x;
     uint32_t y;
+    uint32_t
+        under[8]; // This should be char_width, but it's not a constant value
     bool visible;
 } cursor_t;
 
@@ -54,6 +56,12 @@ void fb_set_fg(uint32_t _fg);
 
 // Set background colour of text
 void fb_set_bg(uint32_t _bg);
+
+// Get current foreground colour of text
+uint32_t fb_get_fg();
+
+// Get current background colour of text
+uint32_t fb_get_bg();
 
 // Reset the text colour
 void fb_reset_color();

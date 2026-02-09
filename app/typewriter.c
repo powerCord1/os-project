@@ -10,7 +10,6 @@ void typewriter_main()
 {
     while (1) {
         key_t key = kbd_get_key(true);
-        log_info("scancode: 0x%x", key.scancode);
 
         switch (key.scancode) {
         case KEY_ESC:

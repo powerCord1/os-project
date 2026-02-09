@@ -12,6 +12,19 @@
 #include <timer.h>
 #include <uacpi/kernel_api.h>
 
+typedef struct {
+    uacpi_interrupt_handler handler;
+    uacpi_handle ctx;
+    uacpi_u32 irq;
+} uacpi_interrupt_wrapper_t;
+
+static uint64_t uacpi_interrupt_stub(uint64_t rsp, void *ctx)
+{
+    uacpi_interrupt_wrapper_t *wrapper = ctx;
+    wrapper->handler(wrapper->ctx);
+    return rsp;
+}
+
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address)
 {
     if (rsdp_request.response == NULL ||
@@ -337,10 +350,16 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler,
+uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler handler,
                                                       uacpi_handle irq_handle)
 {
-    return UACPI_STATUS_UNIMPLEMENTED;
+    uacpi_interrupt_wrapper_t *wrapper = irq_handle;
+    (void)handler;
+
+    irq_uninstall_handler((uint8_t)wrapper->irq, uacpi_interrupt_stub, wrapper);
+    free(wrapper);
+
+    return UACPI_STATUS_OK;
 }
 
 uacpi_handle uacpi_kernel_create_spinlock(void)
@@ -387,10 +406,19 @@ uacpi_status uacpi_kernel_install_interrupt_handler(
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
 
-    irq_install_handler((uint8_t)irq, (void (*)(void *))handler, ctx);
+    uacpi_interrupt_wrapper_t *wrapper = malloc(sizeof(uacpi_interrupt_wrapper_t));
+    if (!wrapper) {
+        return UACPI_STATUS_OUT_OF_MEMORY;
+    }
+
+    wrapper->handler = handler;
+    wrapper->ctx = ctx;
+    wrapper->irq = irq;
+
+    irq_install_handler((uint8_t)irq, uacpi_interrupt_stub, wrapper);
 
     if (out_irq_handle) {
-        *out_irq_handle = (uacpi_handle)(uintptr_t)irq;
+        *out_irq_handle = (uacpi_handle)wrapper;
     }
 
     return UACPI_STATUS_OK;
