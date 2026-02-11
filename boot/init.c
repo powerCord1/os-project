@@ -19,6 +19,8 @@
 #include <tty.h>
 #include <verinfo.h>
 
+bool is_system_initialised = false;
+
 boot_task_t early_boot_tasks[] = {
     {.msg = "Init serial", .func = serial_init}, // so we can get debug info
     {.msg = "Log boot info", .func = log_boot_info},
@@ -41,14 +43,16 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init scheduler", .func = scheduler_init},
 };
 
-boot_task_t late_boot_tasks[] = {};
+boot_task_t late_boot_tasks[] = {
+    {.msg = "Start scheduler", .func = scheduler_start},
+};
 
 void sys_init()
 {
     init_early();
     execute_tasks(boot_tasks, ARRAY_SIZE(boot_tasks));
     init_late();
-    scheduler_start();
+    is_system_initialised = true;
 }
 
 void init_early()

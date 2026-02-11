@@ -107,22 +107,28 @@ void tsc_init()
     // Get TSC frequency from CPUID if available
     if (max_leaf >= 0x15) {
         __cpuid(0x15, eax, ebx, ecx, edx);
-        if (ebx != 0 && eax != 0) {
-            uint64_t core_crystal_freq = ecx;
-            if (core_crystal_freq == 0 && max_leaf >= 0x16) {
+        if (eax != 0 && ebx != 0) {
+            uint64_t crystal_hz = ecx;
+
+            // If ECX is 0, the frequency is not reported.
+            // We can try Leaf 0x16 or use common defaults.
+            if (crystal_hz == 0) {
                 unsigned int eax16, ebx16, ecx16, edx16;
                 __cpuid(0x16, eax16, ebx16, ecx16, edx16);
-                if (eax16 != 0) { // Core crystal clock in MHz
-                    core_crystal_freq = (uint64_t)eax16 * 1000000;
+                if (eax16 != 0) {
+                    // Leaf 0x16 EAX returns base frequency in MHz
+                    // We back-calculate the crystal freq to fit your formula
+                    crystal_hz = ((uint64_t)eax16 * 1000000 * eax) / ebx;
+                } else {
+                    // Hard fallback for many Intel systems if all else fails
+                    crystal_hz = 24000000;
                 }
             }
 
-            if (core_crystal_freq != 0) {
-                tsc_freq_hz = (core_crystal_freq * ebx) / eax;
-                log_info("TSC: Frequency is %lu Hz (from CPUID 0x15).",
-                         tsc_freq_hz);
-                goto tsc_init_done;
-            }
+            tsc_freq_hz = (crystal_hz * ebx) / eax;
+            log_info("TSC: Frequency %lu Hz (Calculated via Leaf 0x15)",
+                     tsc_freq_hz);
+            goto tsc_init_done;
         }
     }
 
@@ -159,7 +165,7 @@ tsc_init_done:
 }
 
 // read nanoseconds since boot using the TSC
-uint64_t get_ns_since_boot()
+uint64_t get_ts()
 {
     if (tsc_freq_hz == 0) {
         return 0;

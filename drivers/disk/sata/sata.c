@@ -188,6 +188,7 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
 // Rebase a port after reset or initialization
 void port_rebase(hba_port_t *port, int portno)
 {
+    (void)portno;
     // Stop command engine
     port->cmd &= ~HBA_PxCMD_ST;
     port->cmd &= ~HBA_PxCMD_FRE;

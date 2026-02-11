@@ -33,16 +33,24 @@ void create_menu(const char *title, const char *prompt, menu_t *menu,
         } else if (keypress.scancode == KEY_ARROW_UP) {
             if (cur_index > 0) {
                 cur_index--;
+            } else {
+                goto wait_for_key;
             }
         } else if (keypress.scancode == KEY_ARROW_DOWN) {
             if (cur_index < item_count - 1) {
                 cur_index++;
+            } else {
+                goto wait_for_key;
             }
         } else if (keypress.scancode == KEY_ENTER) {
             fb_clear();
             fb_draw_title(menu[cur_index].name);
             log_verbose("Selected option: %s", menu[cur_index].name);
-            menu[cur_index].entry();
+            if (menu[cur_index].entry != NULL) {
+                menu[cur_index].entry();
+            } else {
+                log_warn("Not executing null entry: %s", menu[cur_index].name);
+            }
         } else {
             goto wait_for_key;
         }

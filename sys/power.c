@@ -76,7 +76,7 @@ void sys_poweroff()
     // TODO: implement ACPI shutdow
 }
 
-void sys_reset()
+__attribute__((noreturn)) void sys_reset()
 {
     // TODO: implement ACPI reboot
     outb(0x64, 0xFE);

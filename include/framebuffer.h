@@ -11,7 +11,7 @@
 
 extern struct limine_framebuffer *fb;
 
-// Pointer to the Limine framebuffer array
+// Pointer to the Limine framebuffer data
 extern volatile uint32_t *fb_ptr;
 extern bool fb_is_initialised;
 

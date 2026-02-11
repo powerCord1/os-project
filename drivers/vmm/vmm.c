@@ -20,13 +20,11 @@ static uint64_t get_hhdm_offset()
     return hhdm_request.response->offset;
 }
 
-// Helper to convert physical address to virtual using HHDM
 void *phys_to_virt(void *phys_addr)
 {
     return (void *)((uintptr_t)phys_addr + get_hhdm_offset());
 }
 
-// Helper to convert virtual address to physical using HHDM
 void *virt_to_phys(void *virt_addr)
 {
     return (void *)((uintptr_t)virt_addr - get_hhdm_offset());

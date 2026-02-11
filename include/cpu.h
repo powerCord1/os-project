@@ -105,7 +105,7 @@ void enable_mce();
 void sse_init();
 void tsc_init();
 bool is_apic_enabled();
-uint64_t get_ns_since_boot();
+uint64_t get_ts();
 void enable_a20();
 cr0_t get_cr0();
 cr2_t get_cr2();

@@ -2,14 +2,12 @@
 
 #include <stdint.h>
 
-struct interrupt_frame {
+typedef struct interrupt_frame {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
     uint64_t rbp, rax, rbx, rcx, rdx, rsi, rdi;
     uint64_t error_code;
     uint64_t rip, cs, rflags, rsp, ss;
-};
-
-void exception_handler(struct interrupt_frame *frame);
+} interrupt_frame_t;
 
 extern void isr_div_err();
 extern void isr_debug();
@@ -53,6 +51,7 @@ static const char *exceptions[] = {
     "Stack-Segment Fault",
     "General Protection Fault",
     "Page Fault",
+    "Reserved",
     "x87 FPU Floating-Point Error",
     "Alignment Check",
     "Machine Check",
@@ -60,5 +59,16 @@ static const char *exceptions[] = {
     "Virtualization Exception",
     "Control Protection Exception",
     "Reserved",
+    "Reserved",
+    "Reserved",
+    "Reserved",
+    "Reserved",
+    "Reserved",
+    "Hypervisor Injection Exception",
+    "VMM Communication Exception",
     "Security Exception",
+    "Reserved",
 };
+
+void page_fault_handler(interrupt_frame_t *frame);
+void double_fault_handler(interrupt_frame_t *frame);

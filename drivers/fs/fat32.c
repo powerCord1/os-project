@@ -172,7 +172,7 @@ void fat32_set_next_cluster(fat32_fs_t *fs, uint32_t current_cluster,
 
 uint32_t fat32_find_free_cluster(fat32_fs_t *fs)
 {
-    uint32_t total_clusters = fs->total_sectors_32 / fs->sectors_per_cluster;
+    // uint32_t total_clusters = fs->total_sectors_32 / fs->sectors_per_cluster;
     uint32_t fat_sectors_per_read = 1; // simplified
 
     uint8_t *fat_sector_data = (uint8_t *)malloc(fs->bytes_per_sector);

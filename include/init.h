@@ -7,6 +7,8 @@ typedef struct {
     void (*func)(void);
 } boot_task_t;
 
+extern bool is_system_initialised;
+
 void sys_init();
 void init_early();
 void store_boot_time();

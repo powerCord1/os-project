@@ -8,6 +8,7 @@
 #define SPEAKER_PORT 0x61
 
 extern volatile uint64_t pit_ticks;
+extern bool pit_initialised;
 
 void pit_init();
 

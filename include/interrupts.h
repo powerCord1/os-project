@@ -1,13 +1,25 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <isr.h>
+
 void idt_init();
 void enable_interrupts();
 void disable_interrupts();
 bool are_interrupts_enabled();
-void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx);
-void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx);
+void exception_install_handler(uint8_t vector,
+                               void (*handler)(interrupt_frame_t *));
+void exception_uninstall_handler(uint8_t vector);
+uint64_t exception_dispatch(uint64_t rsp, uint8_t vector);
+void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
+                         void *ctx);
+void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
+                           void *ctx);
 uint64_t irq_dispatch(uint64_t rsp, uint8_t irq);
+void register_exceptions();
+
+static struct irq_handler_entry *irq_handlers[16];
+static void (*exception_handlers[32])(interrupt_frame_t *);
 
 struct irq_handler_entry {
     uint64_t (*handler)(uint64_t, void *);

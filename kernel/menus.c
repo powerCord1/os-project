@@ -13,13 +13,7 @@ void main_menu()
     menu_t apps[] = {
         {"Typewriter", &typewriter_main},
         {"Key notes", &key_notes_main},
-        {"Random test", &random_test_main},
         {"Shell", &shell_main},
-        {"Stack Smash Test", &ssp_test_main},
-        {"Element drawing test", &element_test},
-        {"PIT test", &pit_test_main},
-        {"Sine Wave Test", &sin_test_main},
-        {"BMP test", &bmp_test_main},
         {"Test menu", &test_menu},
     };
     create_menu("Main menu", "Choose an app to launch", apps, ARRAY_SIZE(apps));

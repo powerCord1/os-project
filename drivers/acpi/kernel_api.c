@@ -222,16 +222,12 @@ void uacpi_kernel_free(void *mem)
 
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void)
 {
-    return get_ns_since_boot();
+    return get_ts();
 }
 
 void uacpi_kernel_stall(uacpi_u8 usec)
 {
-    uacpi_u64 start = uacpi_kernel_get_nanoseconds_since_boot();
-    uacpi_u64 end = start + (usec * 1000);
-    while (uacpi_kernel_get_nanoseconds_since_boot() < end) {
-        cpu_pause();
-    }
+    wait_us(usec);
 }
 
 void uacpi_kernel_sleep(uacpi_u64 msec)
@@ -350,8 +346,9 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req)
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler handler,
-                                                      uacpi_handle irq_handle)
+uacpi_status
+uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler handler,
+                                         uacpi_handle irq_handle)
 {
     uacpi_interrupt_wrapper_t *wrapper = irq_handle;
     (void)handler;
@@ -406,7 +403,8 @@ uacpi_status uacpi_kernel_install_interrupt_handler(
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
 
-    uacpi_interrupt_wrapper_t *wrapper = malloc(sizeof(uacpi_interrupt_wrapper_t));
+    uacpi_interrupt_wrapper_t *wrapper =
+        malloc(sizeof(uacpi_interrupt_wrapper_t));
     if (!wrapper) {
         return UACPI_STATUS_OUT_OF_MEMORY;
     }

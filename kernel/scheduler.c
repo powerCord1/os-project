@@ -123,7 +123,6 @@ void scheduler_start()
 {
     log_info("Starting scheduler");
     scheduler_running = true;
-    enable_interrupts();
 }
 
 void thread_cancel(uint64_t id)

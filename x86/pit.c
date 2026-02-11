@@ -13,6 +13,7 @@
 #define PIT_FREQUENCY 1000
 
 volatile uint64_t pit_ticks = 0;
+bool pit_initialised = false;
 
 void pit_init()
 {
@@ -31,10 +32,12 @@ void pit_init()
     outb(PIT_CHANNEL0_DATA_PORT, (uint8_t)((divisor >> 8) & 0xFF));
 
     log_verbose("Installing PIT interrupt handler");
-    irq_install_handler(IRQ_TYPE_PIT, (uint64_t (*)(uint64_t, void *))pit_handler, NULL);
+    irq_install_handler(IRQ_TYPE_PIT,
+                        (uint64_t (*)(uint64_t, void *))pit_handler, NULL);
 
     log_verbose("Checking PIT is triggering interrupts");
     pit_check();
+    pit_initialised = true;
 }
 
 uint64_t pit_handler(uint64_t rsp)

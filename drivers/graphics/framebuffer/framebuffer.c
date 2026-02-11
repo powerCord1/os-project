@@ -7,6 +7,7 @@
 #include <font.h>
 #include <framebuffer.h>
 #include <image.h>
+#include <init.h>
 #include <keyboard.h>
 #include <limine.h>
 #include <limine_defs.h>
@@ -20,6 +21,7 @@
 
 #define DEFAULT_TITLE_HEIGHT 3
 #define OPTIMISE_FB false
+#define SLOWMO false
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
@@ -78,6 +80,8 @@ struct limine_framebuffer *get_fb_data()
 void fb_draw_cursor()
 {
     for (uint32_t i = 0; i < char_width; i++) {
+        cursor.under[i] =
+            fb_get_pixel(cursor.x + i, cursor.y + char_height - 1);
         fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, fg);
     }
 }
@@ -85,7 +89,7 @@ void fb_draw_cursor()
 void fb_erase_cursor()
 {
     for (uint32_t i = 0; i < char_width; i++) {
-        fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, bg);
+        fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, cursor.under[i]);
     }
 }
 
@@ -157,6 +161,11 @@ void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
     }
 #endif
     fb_ptr[y * pitch_in_pixels + x] = color;
+#if SLOWMO
+    if (is_system_initialised) {
+        wait_us(10);
+    }
+#endif
 }
 
 uint32_t fb_get_pixel(uint32_t x, uint32_t y)
@@ -461,6 +470,7 @@ void fb_fill_screen(uint32_t color)
             fb_put_pixel(x, y, color);
         }
     }
+    // memset(fb_ptr, fb->width * fb->height, color);
 }
 
 void fb_matrix_test()

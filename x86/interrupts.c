@@ -25,7 +25,37 @@
 idt_entry_t idt[IDT_ENTRIES];
 idtr_t idtr;
 
-static struct irq_handler_entry *irq_handlers[16];
+uint64_t exception_dispatch(uint64_t rsp, uint8_t vector)
+{
+    if (vector < 32) {
+        if (exception_handlers[vector]) {
+            exception_handlers[vector]((interrupt_frame_t *)rsp);
+        } else {
+            log_err("Unhandled exception %d: %s", vector, exceptions[vector]);
+            // Fatal exceptions if no handler is present
+            if (vector == 8 || (vector >= 10 && vector <= 14) || vector == 17 ||
+                vector == 20 || vector == 30) {
+                panic("Fatal unhandled exception");
+            }
+        }
+    }
+    return rsp;
+}
+
+void exception_install_handler(uint8_t vector,
+                               void (*handler)(interrupt_frame_t *))
+{
+    if (vector < 32) {
+        exception_handlers[vector] = handler;
+    }
+}
+
+void exception_uninstall_handler(uint8_t vector)
+{
+    if (vector < 32) {
+        exception_handlers[vector] = NULL;
+    }
+}
 
 uint64_t irq_dispatch(uint64_t rsp, uint8_t irq)
 {
@@ -43,7 +73,8 @@ uint64_t irq_dispatch(uint64_t rsp, uint8_t irq)
     return rsp;
 }
 
-void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx)
+void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
+                         void *ctx)
 {
     if (irq < 16) {
         struct irq_handler_entry *new_handler =
@@ -69,7 +100,8 @@ void irq_install_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), voi
     }
 }
 
-void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), void *ctx)
+void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
+                           void *ctx)
 {
     if (irq < 16) {
         struct irq_handler_entry *current = irq_handlers[irq];
@@ -94,6 +126,39 @@ void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *), v
         }
     }
 }
+
+extern void isr_div_err();
+extern void isr_debug();
+extern void isr_nmi_int();
+extern void isr_breakpoint();
+extern void isr_overflow();
+extern void isr_bound_range();
+extern void isr_invalid_opcode();
+extern void isr_fpu_not_available();
+extern void isr_double_fault();
+extern void isr_coprocessor_seg_overrun();
+extern void isr_invalid_tss();
+extern void isr_invalid_segment();
+extern void isr_seg_fault();
+extern void isr_gpf();
+extern void isr_page_fault();
+extern void isr_unhandled();
+extern void isr_fpu_err();
+extern void isr_alignment_check();
+extern void isr_machine_check();
+extern void isr_simd_floating_point();
+extern void isr_virtualisation();
+extern void isr_control_protection();
+extern void isr_res22();
+extern void isr_res23();
+extern void isr_res24();
+extern void isr_res25();
+extern void isr_res26();
+extern void isr_res27();
+extern void isr_res28();
+extern void isr_vmm_comm();
+extern void isr_security_protection();
+extern void isr_res31();
 
 extern void isr_irq0();
 extern void isr_irq1();
@@ -151,6 +216,10 @@ void idt_init()
         irq_handlers[i] = NULL;
     }
 
+    for (int i = 0; i < 32; i++) {
+        exception_handlers[i] = NULL;
+    }
+
     if (is_apic_enabled()) {
         log_verbose("APIC enabled");
     }
@@ -182,16 +251,16 @@ void idt_init()
         &isr_simd_floating_point,
         &isr_virtualisation,
         &isr_control_protection,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
-        &isr_unhandled,
+        &isr_res22,
+        &isr_res23,
+        &isr_res24,
+        &isr_res25,
+        &isr_res26,
+        &isr_res27,
+        &isr_res28,
+        &isr_vmm_comm,
         &isr_security_protection,
-        &isr_unhandled,
+        &isr_res31,
 
         // interrupts
         &isr_irq0,
@@ -223,6 +292,7 @@ void idt_init()
 
     log_verbose("Loading IDT");
     idt_load();
+    register_exceptions();
     log_verbose("Initialising PIC");
     pic_init();
     enable_interrupts();
@@ -231,6 +301,12 @@ void idt_init()
     if (unlikely(!are_interrupts_enabled())) {
         panic("Failed to enable interrupts");
     }
+}
+
+void register_exceptions()
+{
+    exception_install_handler(14, page_fault_handler);
+    exception_install_handler(8, double_fault_handler);
 }
 
 void idt_load()
