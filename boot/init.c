@@ -13,11 +13,13 @@
 #include <keyboard.h>
 #include <limine.h>
 #include <pit.h>
+#include <pmm.h>
 #include <scheduler.h>
 #include <serial.h>
 #include <stdio.h>
 #include <tty.h>
 #include <verinfo.h>
+#include <vmm.h>
 
 bool is_system_initialised = false;
 
@@ -37,6 +39,8 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init IDT", .func = idt_init},
     {.msg = "Init PIT", .func = pit_init},
     {.msg = "Init TSC", .func = tsc_init},
+    {.msg = "Init PMM", .func = pmm_init},
+    {.msg = "Init VMM", .func = vmm_init},
     // {.msg = "Init ACPI", .func = acpi_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init keyboard", .func = kbd_init},

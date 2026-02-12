@@ -30,7 +30,8 @@ void kbd_init()
     log_verbose("Setting typematic rate, rate: %d, delay: %d",
                 KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
     kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
-    irq_install_handler(IRQ_TYPE_KEYBOARD, (uint64_t (*)(uint64_t, void *))keyboard_handler, NULL);
+    irq_install_handler(IRQ_TYPE_KEYBOARD,
+                        (uint64_t (*)(uint64_t, void *))keyboard_handler, NULL);
 }
 
 uint8_t get_key()
@@ -156,12 +157,10 @@ uint64_t keyboard_handler(uint64_t rsp)
 key_t kbd_get_key(bool wait)
 {
     if (wait) {
-        fb_show_cursor(); // should always show cursor when waiting for input
         last_scancode = 0;
         while (last_scancode == 0) {
             idle();
         }
-        fb_hide_cursor();
     }
     last_key.key = scancode_map[last_scancode];
     last_key.scancode = last_scancode;
@@ -215,6 +214,7 @@ uint8_t kbd_poll_key()
                 return scancode;
             }
         }
+        cpu_pause();
     }
 }
 

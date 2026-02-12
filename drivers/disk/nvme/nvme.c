@@ -249,8 +249,8 @@ void nvme_init(disk_driver_t *driver)
                 controller.pci_dev.function);
 
     // Get BAR0 and map registers
-    uint32_t bar0 = pci_get_bar_address(&controller.pci_dev, 0);
-    controller.regs = (nvme_regs_t *)(uint64_t)bar0; // Assumes identity mapping
+    uint64_t bar0 = pci_get_bar_address(&controller.pci_dev, 0);
+    controller.regs = (nvme_regs_t *)bar0; // Assumes identity mapping
 
     // Enable PCI bus mastering
     uint32_t pci_cmd_reg =

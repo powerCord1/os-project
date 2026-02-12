@@ -34,6 +34,6 @@ uint16_t pci_get_vendor_id(uint8_t bus, uint8_t device, uint8_t function);
 pci_device_t pci_get_device(uint8_t class_code, uint8_t subclass,
                             uint8_t prog_if);
 
-uint32_t pci_get_bar_address(pci_device_t *dev, uint8_t bar_num);
+uint64_t pci_get_bar_address(pci_device_t *dev, uint8_t bar_num);
 
 void pci_scan_bus();

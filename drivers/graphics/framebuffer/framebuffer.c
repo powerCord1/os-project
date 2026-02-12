@@ -22,6 +22,7 @@
 #define DEFAULT_TITLE_HEIGHT 3
 #define OPTIMISE_FB false
 #define SLOWMO false
+#define SLOWMO_US_INTERVAL 8
 
 struct limine_framebuffer *fb;
 volatile uint32_t *fb_ptr;
@@ -67,6 +68,7 @@ void fb_init()
 
     fb_is_initialised = true;
     fb_clear();
+    fb_show_cursor();
     printf("Booting...\n\n");
     print_build_info();
     printf("\n");
@@ -80,16 +82,19 @@ struct limine_framebuffer *get_fb_data()
 void fb_draw_cursor()
 {
     for (uint32_t i = 0; i < char_width; i++) {
-        cursor.under[i] =
-            fb_get_pixel(cursor.x + i, cursor.y + char_height - 1);
-        fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, fg);
+        uint32_t x = cursor.x + i;
+        uint32_t y = cursor.y + char_height - 1;
+        cursor.under[i] = fb_get_pixel(x, y);
+        fb_put_pixel(x, y, fg);
     }
 }
 
 void fb_erase_cursor()
 {
     for (uint32_t i = 0; i < char_width; i++) {
-        fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, cursor.under[i]);
+        uint32_t x = cursor.x + i;
+        uint32_t y = cursor.y + char_height - 1;
+        fb_put_pixel(x, y, cursor.under[i]);
     }
 }
 
@@ -160,10 +165,18 @@ void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
         return;
     }
 #endif
+    // Ensure the cursor doesn't get overwritten - instead, change the value of
+    // the pixel under the cursor
+    if (cursor.visible && x >= cursor.x && x < cursor.x + char_width &&
+        y == cursor.y + char_height - 1) {
+        cursor.under[x - cursor.x] = color;
+        return;
+    }
+    // fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, fg);
     fb_ptr[y * pitch_in_pixels + x] = color;
 #if SLOWMO
     if (is_system_initialised) {
-        wait_us(10);
+        wait_us(SLOWMO_US_INTERVAL);
     }
 #endif
 }
@@ -465,12 +478,13 @@ void fb_scroll()
 
 void fb_fill_screen(uint32_t color)
 {
+    // TODO: use memset to fill screen
+
     for (uint32_t y = 0; y < fb->height; y++) {
         for (uint32_t x = 0; x < fb->width; x++) {
             fb_put_pixel(x, y, color);
         }
     }
-    // memset(fb_ptr, fb->width * fb->height, color);
 }
 
 void fb_matrix_test()
@@ -632,8 +646,6 @@ void fb_print_centered(const char *text)
 
 void fb_draw_title(const char *title)
 {
-    fb_hide_cursor();
-
     fb_set_color(0, 0xffffff);
 
     // draw white block

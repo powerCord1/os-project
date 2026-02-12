@@ -32,7 +32,8 @@ void vmm_init();
  * @param flags Page table flags (e.g., VMM_PRESENT, VMM_WRITE).
  * @return The virtual address corresponding to the start of the mapped region.
  */
-void *mmap_physical(void *phys_addr, size_t size, uint32_t flags);
+void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
+                    uint32_t flags);
 
 // Helper to convert physical address to virtual using HHDM
 void *phys_to_virt(void *phys_addr);

@@ -4,6 +4,7 @@
 #include <pci.h>
 #include <sata.h>
 #include <string.h>
+#include <vmm.h>
 
 #define ATA_CMD_READ_DMA_EX 0x25
 #define ATA_CMD_IDENTIFY 0xEC
@@ -80,9 +81,16 @@ void sata_init(disk_driver_t *driver)
     }
 
     uintptr_t abar_phys = pci_get_bar_address(&ahci_dev, 5);
-    abar = (hba_mem_t *)abar_phys;
+    abar = (hba_mem_t *)mmap_physical(
+        (void *)0xFFFFFFFF40000000, // A safe "MMIO" virtual range
+        (void *)abar_phys, sizeof(hba_mem_t), 0x1B);
 
-    log_info("SATA: AHCI controller found at 0x%x", abar);
+    if (abar == NULL) {
+        log_err("SATA: Failed to map AHCI controller memory.");
+        return;
+    }
+
+    log_info("SATA: AHCI controller found at 0x%016lx", abar);
 
     probe_port(abar, driver);
 }

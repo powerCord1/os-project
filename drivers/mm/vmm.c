@@ -1,9 +1,11 @@
 #include <vmm.h>
 
+#include <cpu.h>
 #include <debug.h>
 #include <heap.h>
 #include <limine.h>
 #include <panic.h>
+#include <pmm.h>
 #include <string.h>
 
 // Page Map Level 4 Table (PML4T)
@@ -13,9 +15,7 @@ static uint64_t *pml4 = NULL;
 static uint64_t get_hhdm_offset()
 {
     if (hhdm_request.response == NULL) {
-        // This should not happen if the bootloader is Limine compliant
-        // and the request is in the right section.
-        panic("VMM: HHDM request not honored by bootloader.");
+        panic("VMM: HHDM request response is NULL");
     }
     return hhdm_request.response->offset;
 }
@@ -36,32 +36,31 @@ void *virt_to_phys(void *virt_addr)
  * allocated.
  *
  * @param entry Pointer to the page table entry.
- * @param create If true, create a new page table if not present.
+ * @param allocate If true, create a new page table if not present.
  * @return Pointer to the next level page table, or NULL on failure.
  */
-static uint64_t *get_next_table(uint64_t *entry, bool create)
+static uint64_t *get_next_table(uint64_t *entry, bool allocate)
 {
     if (*entry & VMM_PRESENT) {
-        return phys_to_virt((void *)(*entry & ~0xFFF));
+        return (uint64_t *)phys_to_virt((void *)(*entry & ~0xFFF));
     }
 
-    if (!create) {
+    if (!allocate) {
         return NULL;
     }
 
-    // Allocate a new page-aligned table
-    void *new_table = malloc(PAGE_SIZE);
-    if (!new_table) {
-        log_err("VMM: Failed to allocate page table.");
+    void *new_table_phys = pmm_alloc_page();
+    if (!new_table_phys) {
+        log_err("VMM: Failed to allocate physical page for table.");
         return NULL;
     }
-    memset(new_table, 0, PAGE_SIZE);
 
-    // The address from malloc is virtual, convert to physical for the entry
-    *entry =
-        (uint64_t)virt_to_phys(new_table) | VMM_PRESENT | VMM_WRITE | VMM_USER;
+    uint64_t *new_table_virt = (uint64_t *)phys_to_virt(new_table_phys);
+    memset(new_table_virt, 0, PAGE_SIZE);
 
-    return new_table;
+    *entry = (uintptr_t)new_table_phys | VMM_PRESENT | VMM_WRITE | VMM_USER;
+
+    return new_table_virt;
 }
 
 /**
@@ -105,25 +104,19 @@ static bool map_page(uint64_t *pml4_table, void *virt_addr, void *phys_addr,
 void vmm_init()
 {
     // Get the current PML4 table from CR3
-    uint64_t cr3;
-    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    cr3_t cr3 = get_cr3();
     pml4 = phys_to_virt((void *)cr3);
 
     log_info("VMM: Initialized with PML4 at phys 0x%x, virt 0x%x", cr3, pml4);
 }
 
-void *mmap_physical(void *phys_addr, size_t size, uint32_t flags)
+void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
+                    uint32_t flags)
 {
     if (!pml4) {
         log_err("VMM: mmap_physical called before vmm_init().");
         return NULL;
     }
-
-    // For simplicity, we'll return the physical address as the virtual address.
-    // This is not ideal for a real-world scenario but works for MMIO where
-    // addresses are high and unlikely to conflict with kernel/user space.
-    // A more robust implementation would find a free virtual address range.
-    void *virt_addr = phys_addr;
 
     uintptr_t phys_start = (uintptr_t)phys_addr;
     uintptr_t virt_start = (uintptr_t)virt_addr;
@@ -143,7 +136,6 @@ void *mmap_physical(void *phys_addr, size_t size, uint32_t flags)
 
         if (!map_page(pml4, current_virt, current_phys, flags)) {
             log_err("VMM: Failed to map page at virt 0x%x", current_virt);
-            // TODO: Unmap already mapped pages on failure
             return NULL;
         }
     }

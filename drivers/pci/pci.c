@@ -107,19 +107,26 @@ pci_device_t pci_get_device(uint8_t class_code, uint8_t subclass,
     return found_dev;
 }
 
-uint32_t pci_get_bar_address(pci_device_t *dev, uint8_t bar_num)
+uint64_t pci_get_bar_address(pci_device_t *dev, uint8_t bar_num)
 {
     if (bar_num >= 6) {
         return 0;
     }
 
     uint8_t offset = 0x10 + (bar_num * 4);
-    uint32_t bar = pci_read_dword(dev->bus, dev->device, dev->function, offset);
+    uint32_t bar_low =
+        pci_read_dword(dev->bus, dev->device, dev->function, offset);
 
-    if (bar & 0x1) { // I/O space BAR
-        return bar & 0xFFFFFFFC;
-    } else { // Memory space BAR
-        return bar & 0xFFFFFFF0;
+    if (bar_low & 0x1) { // I/O Space
+        return bar_low & 0xFFFFFFFC;
+    } else { // Memory Space
+        uint8_t type = (bar_low >> 1) & 0x03;
+        if (type == 0x02) { // 64-bit BAR
+            uint32_t bar_high = pci_read_dword(dev->bus, dev->device,
+                                               dev->function, offset + 4);
+            return ((uint64_t)bar_high << 32) | (bar_low & 0xFFFFFFF0);
+        }
+        return bar_low & 0xFFFFFFF0; // 32-bit
     }
 }
 
