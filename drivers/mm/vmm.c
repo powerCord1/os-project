@@ -22,12 +22,51 @@ static uint64_t get_hhdm_offset()
 
 void *phys_to_virt(void *phys_addr)
 {
-    return (void *)((uintptr_t)phys_addr + get_hhdm_offset());
+    void *ret = (void *)((uintptr_t)phys_addr + get_hhdm_offset());
+    if (ret == NULL) {
+        log_err("VMM: phys_to_virt returned NULL, this could cause issues");
+    }
+    return ret;
 }
 
 void *virt_to_phys(void *virt_addr)
 {
     return (void *)((uintptr_t)virt_addr - get_hhdm_offset());
+}
+
+void *vmm_get_phys(void *virt_addr)
+{
+    uintptr_t virt = (uintptr_t)virt_addr;
+    size_t pml4_index = (virt >> 39) & 0x1FF;
+    size_t pdpt_index = (virt >> 30) & 0x1FF;
+    size_t pd_index = (virt >> 21) & 0x1FF;
+    size_t pt_index = (virt >> 12) & 0x1FF;
+
+    if (!(pml4[pml4_index] & VMM_PRESENT)) {
+        return NULL;
+    }
+    uint64_t *pdpt = (uint64_t *)phys_to_virt((void *)(pml4[pml4_index] & ~0xFFF));
+
+    if (!(pdpt[pdpt_index] & VMM_PRESENT)) {
+        return NULL;
+    }
+    uint64_t *pd = (uint64_t *)phys_to_virt((void *)(pdpt[pdpt_index] & ~0xFFF));
+
+    if (!(pd[pd_index] & VMM_PRESENT)) {
+        return NULL;
+    }
+
+    // Check if it's a 2MB page (HUGE PAGE)
+    if (pd[pd_index] & (1 << 7)) {
+        return (void *)((pd[pd_index] & ~0x1FFFFF) | (virt & 0x1FFFFF));
+    }
+
+    uint64_t *pt = (uint64_t *)phys_to_virt((void *)(pd[pd_index] & ~0xFFF));
+    if (!(pt[pt_index] & VMM_PRESENT)) {
+        return NULL;
+    }
+
+    return (void *)((pt[pt_index] & ~0xFFF) | (virt & 0xFFF));
 }
 
 /**

@@ -122,3 +122,5 @@ struct disk_driver;
 
 void sata_init(disk_driver_t *driver);
 int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf);
+void port_rebase(hba_port_t *port, int portno);
+void ahci_reset(hba_mem_t *abar_ptr);

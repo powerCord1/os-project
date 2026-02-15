@@ -60,7 +60,7 @@ void disk_init()
     }
 
     log_verbose("Loading SATA drives");
-    // sata_init(&sata_driver); // TODO: fix page fault
+    sata_init(&sata_driver); // TODO: fix page fault
     nvme_init(&nvme_driver);
 }
 

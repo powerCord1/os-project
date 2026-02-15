@@ -2,6 +2,7 @@
 #include <disk.h>
 #include <heap.h>
 #include <pci.h>
+#include <pmm.h>
 #include <sata.h>
 #include <string.h>
 #include <vmm.h>
@@ -92,6 +93,8 @@ void sata_init(disk_driver_t *driver)
 
     log_info("SATA: AHCI controller found at 0x%016lx", abar);
 
+    ahci_reset(abar);
+
     probe_port(abar, driver);
 }
 
@@ -112,38 +115,61 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
 {
     port->is = (uint32_t)-1; // Clear pending interrupt bits
     int slot = find_cmdslot(port);
+    log_verbose("sata_read: find_cmdslot(%p): %d", port, slot);
     if (slot == -1) {
         return 0;
     }
 
-    hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)((uintptr_t)port->clb);
+    uint64_t clb_phys = port->clb;
+    clb_phys |= ((uint64_t)port->clbu << 32);
+
+    hba_cmd_header_t *cmdheader =
+        (hba_cmd_header_t *)phys_to_virt((void *)(uintptr_t)clb_phys);
     cmdheader += slot;
     cmdheader->cfl = sizeof(fis_reg_h2d_t) / sizeof(uint32_t);
-    cmdheader->w = 0;
-    cmdheader->prdtl = 1;
+    cmdheader->w = 0; // Read from device
+    cmdheader->prdtl = 0;
 
-    hba_cmd_tbl_t *cmdtbl = (hba_cmd_tbl_t *)((uintptr_t)cmdheader->ctba);
-    memset(cmdtbl, 0,
-           sizeof(hba_cmd_tbl_t) +
-               (cmdheader->prdtl * sizeof(hba_prdt_entry_t)));
+    uint64_t ctba_phys = cmdheader->ctba;
+    ctba_phys |= ((uint64_t)cmdheader->ctbau << 32);
 
-    // 8K bytes (16 sectors) per PRDT
-    // A single PRDT entry can point to a buffer up to 4MB
-    // We are reading 'count' sectors. 1 sector = 512 bytes.
-    // So, total bytes = count * 512
-    // For simplicity, this implementation assumes the read fits in one PRD.
-    // A more robust implementation would loop and create multiple PRDs if
-    // needed.
-    cmdtbl->prdt_entry[0].dba = (uint32_t)(uintptr_t)buf;
-    cmdtbl->prdt_entry[0].dbau = (uint32_t)(((uintptr_t)buf) >> 32);
-    cmdtbl->prdt_entry[0].dbc = (count << 9) - 1;
-    cmdtbl->prdt_entry[0].i = 1; // Interrupt on completion
+    hba_cmd_tbl_t *cmdtbl =
+        (hba_cmd_tbl_t *)phys_to_virt((void *)(uintptr_t)ctba_phys);
 
-    // Setup command
+    // Calculate total bytes and required PRDT entries
+    uint32_t byte_count = count << 9; // count * 512
+    int prdtl = 0;
+    uintptr_t temp_buf_virt = (uintptr_t)buf;
+
+    // Fill PRDT entries
+    while (byte_count > 0) {
+        uint32_t size = (byte_count > 0x400000) ? 0x400000 : byte_count;
+
+        void *phys_buf = vmm_get_phys((void *)temp_buf_virt);
+        if (!phys_buf) {
+            log_err("SATA: Failed to get physical address for buffer 0x%lx",
+                    temp_buf_virt);
+            return 0;
+        }
+
+        cmdtbl->prdt_entry[prdtl].dba = (uint32_t)(uintptr_t)phys_buf;
+        cmdtbl->prdt_entry[prdtl].dbau = (uint32_t)((uintptr_t)phys_buf >> 32);
+        cmdtbl->prdt_entry[prdtl].dbc = size - 1;
+        cmdtbl->prdt_entry[prdtl].i = 0;
+
+        temp_buf_virt += size;
+        byte_count -= size;
+        prdtl++;
+    }
+
+    cmdtbl->prdt_entry[prdtl - 1].i = 1;
+    cmdheader->prdtl = prdtl;
+
+    memset(cmdtbl->cfis, 0, sizeof(cmdtbl->cfis));
+
     fis_reg_h2d_t *cmdfis = (fis_reg_h2d_t *)(&cmdtbl->cfis);
-
     cmdfis->fis_type = FIS_TYPE_REG_H2D;
-    cmdfis->c = 1; // Command
+    cmdfis->c = 1;
     cmdfis->command = ATA_CMD_READ_DMA_EX;
 
     cmdfis->lba0 = (uint8_t)start;
@@ -173,25 +199,14 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
         if ((port->ci & (1 << slot)) == 0) {
             break;
         }
-        if (port->is & (1 << 30)) // Task File Error
-        {
+        if (port->is & (1 << 30)) {
             log_err("SATA: Read disk error");
             return 0;
         }
     }
 
-    if (port->is & (1 << 30)) {
-        log_err("SATA: Read disk error after command completion");
-        return 0;
-    }
-
     return 1;
 }
-
-/*
- * The following are placeholders for a more complete driver.
- * For now, they are not implemented.
- */
 
 // Rebase a port after reset or initialization
 void port_rebase(hba_port_t *port, int portno)
@@ -201,37 +216,47 @@ void port_rebase(hba_port_t *port, int portno)
     port->cmd &= ~HBA_PxCMD_ST;
     port->cmd &= ~HBA_PxCMD_FRE;
 
-    // Wait until FR (FIS Receive Running) and CR (Command List Running) are
-    // cleared
-    while (port->cmd & HBA_PxCMD_FR || port->cmd & HBA_PxCMD_CR)
-        ;
+    // Wait until FR and CR are cleared
+    int spin = 0;
+    while ((port->cmd & HBA_PxCMD_FR || port->cmd & HBA_PxCMD_CR) &&
+           spin < 1000) {
+        spin++;
+    }
 
-    // Allocate memory for command list and FIS receive area
-    // For a real OS, you'd use a physical memory allocator.
-    // We'll assume malloc gives us a suitable physical address for now.
-    void *cmdlist_base = malloc(1024); // 32 cmd headers * 32 bytes = 1KB
-    void *fis_base = malloc(256);
+    // Allocate memory for command list and FIS receive area (one page is enough
+    // for both)
+    void *cl_phys = pmm_alloc_page();
+    void *cl_virt = phys_to_virt(cl_phys);
+    memset(cl_virt, 0, 4096);
 
-    memset(cmdlist_base, 0, 1024);
-    memset(fis_base, 0, 256);
+    port->clb = (uint32_t)(uintptr_t)cl_phys;
+    port->clbu = (uint32_t)((uintptr_t)cl_phys >> 32);
 
-    port->clb = (uint32_t)(uintptr_t)cmdlist_base;
-    port->clbu = (uint32_t)(((uintptr_t)cmdlist_base) >> 32);
-    port->fb = (uint32_t)(uintptr_t)fis_base;
-    port->fbu = (uint32_t)(((uintptr_t)fis_base) >> 32);
+    void *fb_phys = (void *)((uintptr_t)cl_phys + 1024);
+    port->fb = (uint32_t)(uintptr_t)fb_phys;
+    port->fbu = (uint32_t)((uintptr_t)fb_phys >> 32);
 
-    // Point each command header to its command table
-    hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)((uintptr_t)port->clb);
+    // Allocate memory for command tables (32 tables * 256 bytes = 8KB = 2
+    // pages)
+    void *ct_phys_base1 = pmm_alloc_page();
+    void *ct_phys_base2 = pmm_alloc_page();
+
+    hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)cl_virt;
     for (int i = 0; i < 32; i++) {
         cmdheader[i].prdtl = 8;
 
-        // Allocate 256 bytes for each command table.
-        // 8 PRDTs * 16 bytes/PRDT + command FIS + ACMD = 128 + 64 + 16 = 208
-        // bytes
-        void *cmdtbl_base = malloc(256);
-        memset(cmdtbl_base, 0, 256);
-        cmdheader[i].ctba = (uint32_t)(uintptr_t)cmdtbl_base;
-        cmdheader[i].ctbau = (uint32_t)(((uintptr_t)cmdtbl_base) >> 32);
+        void *ct_phys;
+        if (i < 16) {
+            ct_phys = (void *)((uintptr_t)ct_phys_base1 + (i * 256));
+        } else {
+            ct_phys = (void *)((uintptr_t)ct_phys_base2 + ((i - 16) * 256));
+        }
+
+        cmdheader[i].ctba = (uint32_t)(uintptr_t)ct_phys;
+        cmdheader[i].ctbau = (uint32_t)((uintptr_t)ct_phys >> 32);
+
+        void *ct_virt = phys_to_virt(ct_phys);
+        memset(ct_virt, 0, 256);
     }
 
     // Start command engine
@@ -239,21 +264,20 @@ void port_rebase(hba_port_t *port, int portno)
     port->cmd |= HBA_PxCMD_ST;
 }
 
-void ahci_reset(hba_mem_t *abar)
+void ahci_reset(hba_mem_t *abar_ptr)
 {
-    abar->ghc |= (1 << 0);
-    while (abar->ghc & 1)
+    abar_ptr->ghc |= (1 << 0);
+    while (abar_ptr->ghc & 1)
         ;
 
     // Enable AHCI mode
-    abar->ghc |= (1 << 31);
+    abar_ptr->ghc |= (1 << 31);
 
     // Rebase all implemented ports
-    uint32_t pi = abar->pi;
+    uint32_t pi = abar_ptr->pi;
     for (int i = 0; i < 32; i++) {
-        if (pi & 1) {
-            port_rebase(&abar->ports[i], i);
+        if (pi & (1 << i)) {
+            port_rebase(&abar_ptr->ports[i], i);
         }
-        pi >>= 1;
     }
 }

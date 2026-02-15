@@ -5,7 +5,7 @@
 
 struct disk;
 
-typedef struct {
+typedef struct disk_driver {
     const char *name;
     bool (*read_sectors)(struct disk *d, uint64_t lba, uint32_t count,
                          void *buf);

@@ -126,8 +126,8 @@ void tsc_init()
             }
 
             tsc_freq_hz = (crystal_hz * ebx) / eax;
-            log_info("TSC: Frequency %lu Hz (Calculated via Leaf 0x15)",
-                     tsc_freq_hz);
+            log_verbose("TSC: Frequency %lu Hz (Calculated via Leaf 0x15)",
+                        tsc_freq_hz);
             goto tsc_init_done;
         }
     }
@@ -136,8 +136,8 @@ void tsc_init()
         __cpuid(0x16, eax, ebx, ecx, edx);
         if (ebx != 0) { // TSC frequency in MHz
             tsc_freq_hz = (uint64_t)ebx * 1000000;
-            log_info("TSC: Frequency is %lu Hz (from CPUID 0x16).",
-                     tsc_freq_hz);
+            log_verbose("TSC: Frequency is %lu Hz (from CPUID 0x16).",
+                        tsc_freq_hz);
             goto tsc_init_done;
         }
     }
