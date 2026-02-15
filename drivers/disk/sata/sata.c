@@ -1,3 +1,4 @@
+#include <ahci.h>
 #include <debug.h>
 #include <disk.h>
 #include <heap.h>
@@ -10,12 +11,7 @@
 #define ATA_CMD_READ_DMA_EX 0x25
 #define ATA_CMD_IDENTIFY 0xEC
 
-#define HBA_PxCMD_ST 0x0001
-#define HBA_PxCMD_FRE 0x0010
-#define HBA_PxCMD_FR 0x4000
-#define HBA_PxCMD_CR 0x8000
-
-static hba_mem_t *abar;
+extern hba_mem_t *ahci_abar;
 
 static int check_type(hba_port_t *port)
 {
@@ -74,48 +70,20 @@ static void probe_port(hba_mem_t *ab, disk_driver_t *driver)
 
 void sata_init(disk_driver_t *driver)
 {
-    pci_device_t ahci_dev = pci_get_device(0x01, 0x06, 0x01);
+    ahci_init();
 
-    if (ahci_dev.vendor_id == 0xFFFF) {
-        log_warn("SATA: No AHCI controller found.");
+    if (ahci_abar == NULL) {
         return;
     }
 
-    uintptr_t abar_phys = pci_get_bar_address(&ahci_dev, 5);
-    abar = (hba_mem_t *)mmap_physical(
-        (void *)0xFFFFFFFF40000000, // A safe "MMIO" virtual range
-        (void *)abar_phys, sizeof(hba_mem_t), 0x1B);
-
-    if (abar == NULL) {
-        log_err("SATA: Failed to map AHCI controller memory.");
-        return;
-    }
-
-    log_info("SATA: AHCI controller found at 0x%016lx", abar);
-
-    ahci_reset(abar);
-
-    probe_port(abar, driver);
-}
-
-static int find_cmdslot(hba_port_t *port)
-{
-    uint32_t slots = (port->sact | port->ci);
-    for (int i = 0; i < 32; i++) {
-        if ((slots & 1) == 0) {
-            return i;
-        }
-        slots >>= 1;
-    }
-    log_warn("SATA: Cannot find free command list slot");
-    return -1;
+    probe_port(ahci_abar, driver);
 }
 
 int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
 {
     port->is = (uint32_t)-1; // Clear pending interrupt bits
-    int slot = find_cmdslot(port);
-    log_verbose("sata_read: find_cmdslot(%p): %d", port, slot);
+    int slot = ahci_find_cmdslot(port);
+    log_verbose("sata_read: ahci_find_cmdslot(%p): %d", port, slot);
     if (slot == -1) {
         return 0;
     }
@@ -147,8 +115,7 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
 
         void *phys_buf = vmm_get_phys((void *)temp_buf_virt);
         if (!phys_buf) {
-            log_err("SATA: Failed to get physical address for buffer 0x%lx",
-                    temp_buf_virt);
+            log_err("SATA: Failed to get physical address for buffer 0x%lx", temp_buf_virt);
             return 0;
         }
 
@@ -206,78 +173,4 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
     }
 
     return 1;
-}
-
-// Rebase a port after reset or initialization
-void port_rebase(hba_port_t *port, int portno)
-{
-    (void)portno;
-    // Stop command engine
-    port->cmd &= ~HBA_PxCMD_ST;
-    port->cmd &= ~HBA_PxCMD_FRE;
-
-    // Wait until FR and CR are cleared
-    int spin = 0;
-    while ((port->cmd & HBA_PxCMD_FR || port->cmd & HBA_PxCMD_CR) &&
-           spin < 1000) {
-        spin++;
-    }
-
-    // Allocate memory for command list and FIS receive area (one page is enough
-    // for both)
-    void *cl_phys = pmm_alloc_page();
-    void *cl_virt = phys_to_virt(cl_phys);
-    memset(cl_virt, 0, 4096);
-
-    port->clb = (uint32_t)(uintptr_t)cl_phys;
-    port->clbu = (uint32_t)((uintptr_t)cl_phys >> 32);
-
-    void *fb_phys = (void *)((uintptr_t)cl_phys + 1024);
-    port->fb = (uint32_t)(uintptr_t)fb_phys;
-    port->fbu = (uint32_t)((uintptr_t)fb_phys >> 32);
-
-    // Allocate memory for command tables (32 tables * 256 bytes = 8KB = 2
-    // pages)
-    void *ct_phys_base1 = pmm_alloc_page();
-    void *ct_phys_base2 = pmm_alloc_page();
-
-    hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)cl_virt;
-    for (int i = 0; i < 32; i++) {
-        cmdheader[i].prdtl = 8;
-
-        void *ct_phys;
-        if (i < 16) {
-            ct_phys = (void *)((uintptr_t)ct_phys_base1 + (i * 256));
-        } else {
-            ct_phys = (void *)((uintptr_t)ct_phys_base2 + ((i - 16) * 256));
-        }
-
-        cmdheader[i].ctba = (uint32_t)(uintptr_t)ct_phys;
-        cmdheader[i].ctbau = (uint32_t)((uintptr_t)ct_phys >> 32);
-
-        void *ct_virt = phys_to_virt(ct_phys);
-        memset(ct_virt, 0, 256);
-    }
-
-    // Start command engine
-    port->cmd |= HBA_PxCMD_FRE;
-    port->cmd |= HBA_PxCMD_ST;
-}
-
-void ahci_reset(hba_mem_t *abar_ptr)
-{
-    abar_ptr->ghc |= (1 << 0);
-    while (abar_ptr->ghc & 1)
-        ;
-
-    // Enable AHCI mode
-    abar_ptr->ghc |= (1 << 31);
-
-    // Rebase all implemented ports
-    uint32_t pi = abar_ptr->pi;
-    for (int i = 0; i < 32; i++) {
-        if (pi & (1 << i)) {
-            port_rebase(&abar_ptr->ports[i], i);
-        }
-    }
 }
