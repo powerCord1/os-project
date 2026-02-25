@@ -45,12 +45,14 @@ void *vmm_get_phys(void *virt_addr)
     if (!(pml4[pml4_index] & VMM_PRESENT)) {
         return NULL;
     }
-    uint64_t *pdpt = (uint64_t *)phys_to_virt((void *)(pml4[pml4_index] & ~0xFFF));
+    uint64_t *pdpt =
+        (uint64_t *)phys_to_virt((void *)(pml4[pml4_index] & ~0xFFF));
 
     if (!(pdpt[pdpt_index] & VMM_PRESENT)) {
         return NULL;
     }
-    uint64_t *pd = (uint64_t *)phys_to_virt((void *)(pdpt[pdpt_index] & ~0xFFF));
+    uint64_t *pd =
+        (uint64_t *)phys_to_virt((void *)(pdpt[pdpt_index] & ~0xFFF));
 
     if (!(pd[pd_index] & VMM_PRESENT)) {
         return NULL;
@@ -158,13 +160,23 @@ void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
     }
 
     uintptr_t phys_start = (uintptr_t)phys_addr;
-    uintptr_t virt_start = (uintptr_t)virt_addr;
-
-    // Align to page boundaries
     uintptr_t phys_aligned = phys_start & ~(PAGE_SIZE - 1);
-    uintptr_t virt_aligned = virt_start & ~(PAGE_SIZE - 1);
     size_t num_pages =
         ((phys_start + size - phys_aligned) + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    uintptr_t virt_aligned;
+    if (virt_addr == NULL) {
+        // Find free virtual memory area
+        // Implement a VMM function to find available space
+        virt_aligned = (uintptr_t)find_free_virt_pages(num_pages);
+        if (virt_aligned == 0) {
+            log_err("VMM: Failed to allocate virtual address space");
+            return NULL;
+        }
+    } else {
+        // Align provided virtual address
+        virt_aligned = (uintptr_t)virt_addr & ~(PAGE_SIZE - 1);
+    }
 
     log_verbose("VMM: Mapping %d pages from phys 0x%x to virt 0x%x", num_pages,
                 phys_aligned, virt_aligned);
@@ -172,7 +184,6 @@ void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
     for (size_t i = 0; i < num_pages; i++) {
         void *current_phys = (void *)(phys_aligned + i * PAGE_SIZE);
         void *current_virt = (void *)(virt_aligned + i * PAGE_SIZE);
-
         if (!map_page(pml4, current_virt, current_phys, flags)) {
             log_err("VMM: Failed to map page at virt 0x%x", current_virt);
             return NULL;
@@ -185,5 +196,33 @@ void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
             "invlpg (%0)" ::"r"((void *)(virt_aligned + i * PAGE_SIZE)));
     }
 
-    return virt_addr;
+    // Return the virtual address (either original or allocated)
+    uintptr_t offset = phys_start - phys_aligned;
+    return (void *)(virt_aligned + offset);
+}
+
+void *find_free_virt_pages(size_t num_pages)
+{
+    // Simple linear search for free virtual address space starting after the
+    // HHDM This is a basic implementation and should be replaced by a proper
+    // VMA manager
+    static uintptr_t search_start = 0xFFFF800000000000;
+    uintptr_t current_addr = search_start;
+
+    while (current_addr < 0xFFFFFFFFFFFFFFFF) {
+        bool area_free = true;
+        for (size_t i = 0; i < num_pages; i++) {
+            if (vmm_get_phys((void *)(current_addr + i * PAGE_SIZE)) != NULL) {
+                area_free = false;
+                current_addr += (i + 1) * PAGE_SIZE;
+                break;
+            }
+        }
+
+        if (area_free) {
+            return (void *)current_addr;
+        }
+    }
+
+    return NULL;
 }

@@ -118,6 +118,8 @@ typedef struct {
     hba_prdt_entry_t prdt_entry[];
 } __attribute__((packed)) hba_cmd_tbl_t;
 
+extern hba_mem_t *ahci_abar;
+
 void ahci_init();
 void ahci_reset(hba_mem_t *abar_ptr);
 void port_rebase(hba_port_t *port, int portno);

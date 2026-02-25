@@ -16,6 +16,9 @@
 // Set if the page is accessible from user mode
 #define VMM_USER (1 << 2)
 
+#define KERNEL_DYNAMIC_START 0xFFFF900000000000
+#define KERNEL_DYNAMIC_END 0xFFFFBFFFFFFFFFFF
+
 /**
  * @brief Initializes the virtual memory manager.
  *
@@ -39,11 +42,8 @@ void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
 void *phys_to_virt(void *phys_addr);
 
 // Helper to convert virtual address to physical using HHDM
-
 void *virt_to_phys(void *virt_addr);
 
-
-
 // Helper to convert virtual address to physical by walking the page tables
-
 void *vmm_get_phys(void *virt_addr);
+void *find_free_virt_pages(size_t num_pages);

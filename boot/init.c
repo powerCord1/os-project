@@ -41,7 +41,7 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init VMM", .func = vmm_init},
     {.msg = "Init PIT", .func = pit_init},
     {.msg = "Init TSC", .func = tsc_init},
-    // {.msg = "Init ACPI", .func = acpi_init},
+    {.msg = "Init ACPI", .func = acpi_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init keyboard", .func = kbd_init},
     {.msg = "Init scheduler", .func = scheduler_init},

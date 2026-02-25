@@ -11,8 +11,6 @@
 #define ATA_CMD_READ_DMA_EX 0x25
 #define ATA_CMD_IDENTIFY 0xEC
 
-extern hba_mem_t *ahci_abar;
-
 static int check_type(hba_port_t *port)
 {
     uint32_t ssts = port->ssts;
@@ -115,7 +113,8 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
 
         void *phys_buf = vmm_get_phys((void *)temp_buf_virt);
         if (!phys_buf) {
-            log_err("SATA: Failed to get physical address for buffer 0x%lx", temp_buf_virt);
+            log_err("SATA: Failed to get physical address for buffer 0x%lx",
+                    temp_buf_virt);
             return 0;
         }
 

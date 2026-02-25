@@ -151,3 +151,58 @@ void thread_cancel(uint64_t id)
     }
     enable_interrupts();
 }
+
+void wait_for_thread(uint64_t id)
+{
+    while (true) {
+        disable_interrupts();
+        thread_t *thread = ready_list;
+        bool still_exists = false;
+
+        if (thread != NULL) {
+            do {
+                if (thread->id == id &&
+                    thread->state != THREAD_STATE_TERMINATED) {
+                    still_exists = true;
+                    break;
+                }
+                thread = thread->next;
+            } while (thread != ready_list);
+        }
+
+        enable_interrupts();
+
+        if (!still_exists) {
+            break;
+        }
+
+        scheduler_yield();
+    }
+}
+
+void wait_for_all_threads()
+{
+    disable_interrupts();
+    thread_t *start_node = ready_list;
+    thread_t *current = start_node;
+
+    if (current == NULL) {
+        enable_interrupts();
+        return;
+    }
+
+    // Collect IDs first to avoid issues if the list structure changes
+    // during yields (though in this simple scheduler it's circular)
+    do {
+        uint64_t id = current->id;
+        // Don't wait for the current execution flow (kernel main/initial thread)
+        if (id != 0) {
+            enable_interrupts();
+            wait_for_thread(id);
+            disable_interrupts();
+        }
+        current = current->next;
+    } while (current != start_node);
+
+    enable_interrupts();
+}

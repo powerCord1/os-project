@@ -67,13 +67,14 @@ void do_shutdown_calls()
 
 void sys_poweroff()
 {
-    outw(SHUTDOWN_PORT_BOCHS, SHUTDOWN_SIG_BOCHS); // bochs
-    outw(SHUTDOWN_PORT_QEMU, SHUTDOWN_SIG_QEMU);   // qemu
-    outw(SHUTDOWN_PORT_VBOX, SHUTDOWN_SIG_VBOX);   // vbox
-    outw(SHUTDOWN_PORT_CLOUD_HYPERVISOR,
-         SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
+    // outw(SHUTDOWN_PORT_BOCHS, SHUTDOWN_SIG_BOCHS); // bochs
+    // outw(SHUTDOWN_PORT_QEMU, SHUTDOWN_SIG_QEMU);   // qemu
+    // outw(SHUTDOWN_PORT_VBOX, SHUTDOWN_SIG_VBOX);   // vbox
+    // outw(SHUTDOWN_PORT_CLOUD_HYPERVISOR,
+    //      SHUTDOWN_SIG_CLOUD_HYPERVISOR); // cloud hypervisor
 
-    // TODO: implement ACPI shutdow
+    // TODO: implement ACPI shutdown
+    // uacpi_prepare_for_sleep_state()
 }
 
 __attribute__((noreturn)) void sys_reset()

@@ -22,8 +22,9 @@ void fs_init()
                 if (partitions[i].type == 0x0B || partitions[i].type == 0x0C) {
                     if (fat32_mount(disk_id, partitions[i].lba_start,
                                     partitions[i].num_sectors)) {
-                        log_info("Init: Mounted FAT32 on disk %d, partition %d",
-                                 disk_id, i);
+                        log_info(
+                            "fs_init: Mounted FAT32 on disk %d, partition %d",
+                            disk_id, i);
                         return; // exit after first filesystem is mounted
                     }
                 }

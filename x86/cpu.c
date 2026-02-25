@@ -26,6 +26,7 @@ void cpu_init()
     sse_init();
     enable_a20();
     enable_mce();
+    get_vendor_id();
 }
 
 void halt()
@@ -75,13 +76,6 @@ void enable_mce()
     cr4_t cr4 = get_cr4();
     cr4.bit_list.mce = 1;
     set_cr4(cr4);
-}
-
-bool is_apic_enabled()
-{
-    unsigned int eax, ebx, ecx, edx;
-    __cpuid(1, eax, ebx, ecx, edx);
-    return (edx & (1 << 9));
 }
 
 void tsc_init()
@@ -250,3 +244,27 @@ void set_rflags(rflags_t rflags)
 #undef GET_CR_STUB
 
 // TODO: make a function to get and set cr value to prevent repetitive code
+
+void get_vendor_id()
+{
+    uint32_t eax;
+    uint32_t ebx;
+    uint32_t ecx;
+    uint32_t edx;
+    char vendor_id[12];
+
+    __cpuid(CPUID_LEAF_VENDOR_ID, eax, ebx, ecx, edx);
+    *(uint32_t *)(vendor_id + 0) = ebx;
+    *(uint32_t *)(vendor_id + 4) = edx;
+    *(uint32_t *)(vendor_id + 8) = ecx;
+    vendor_id[12] = '\0';
+
+    log_verbose("CPUID: Vendor ID: %s", vendor_id);
+}
+
+bool is_apic_enabled()
+{
+    unsigned int eax, ebx, ecx, edx;
+    __cpuid(CPUID_LEAF_APIC, eax, ebx, ecx, edx);
+    return (edx & (1 << 9));
+}

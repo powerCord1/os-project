@@ -19,6 +19,7 @@ __attribute__((noreturn)) void panic(const char *reason)
     fb_set_color(0xFF0000, 0);
     printf("KERNEL PANIC: %s\n", reason);
 #if HALT_ON_PANIC
+    printf("System halted");
     halt_cf();
 #else
     printf("Press any key to reboot");

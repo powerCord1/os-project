@@ -5,12 +5,15 @@
 #include <interrupts.h>
 #include <io.h>
 #include <limine.h>
+#include <lock.h>
 #include <panic.h>
 #include <pci.h>
 #include <pit.h>
+#include <scheduler.h>
 #include <string.h>
 #include <timer.h>
 #include <uacpi/kernel_api.h>
+#include <vmm.h>
 
 typedef struct {
     uacpi_interrupt_handler handler;
@@ -45,15 +48,12 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address)
 
 void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
 {
-    (void)len;
-    if (hhdm_request.response == NULL) {
-        return NULL;
-    }
-    return (void *)(addr + hhdm_request.response->offset);
+    return mmap_physical(NULL, (void *)addr, len, VMM_PRESENT | VMM_WRITE);
 }
 
 void uacpi_kernel_unmap(void *addr, uacpi_size len)
 {
+    // TODO: create VMA manager
     (void)addr;
     (void)len;
 }
@@ -237,16 +237,16 @@ void uacpi_kernel_sleep(uacpi_u64 msec)
 
 uacpi_handle uacpi_kernel_create_mutex(void)
 {
-    // This is a simplified mutex implementation. A real OS would have a proper
-    // scheduler and synchronization primitives.
-    bool *lock = malloc(sizeof(bool));
-    *lock = false;
+    spinlock_t *lock = malloc(sizeof(spinlock_t));
+    if (lock) {
+        spinlock_release(lock);
+    }
     return (uacpi_handle)lock;
 }
 
 void uacpi_kernel_free_mutex(uacpi_handle handle)
 {
-    free((bool *)handle);
+    free((spinlock_t *)handle);
 }
 
 uacpi_handle uacpi_kernel_create_event(void)
@@ -271,23 +271,14 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void)
 
 uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout)
 {
-    bool *lock = (bool *)handle;
-    uacpi_u64 start_ticks = pit_ticks;
-
-    while (__atomic_test_and_set(lock, __ATOMIC_ACQUIRE)) {
-        if (timeout != 0xFFFF && (pit_ticks - start_ticks) > timeout) {
-            return UACPI_STATUS_TIMEOUT;
-        }
-        cpu_pause();
-    }
-
+    (void)timeout; // TODO
+    spinlock_acquire((spinlock_t *)handle);
     return UACPI_STATUS_OK;
 }
 
 void uacpi_kernel_release_mutex(uacpi_handle handle)
 {
-    bool *lock = (bool *)handle;
-    __atomic_clear(lock, __ATOMIC_RELEASE);
+    spinlock_release((spinlock_t *)handle);
 }
 
 uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
@@ -384,15 +375,12 @@ uacpi_status uacpi_kernel_schedule_work(uacpi_work_type,
                                         uacpi_work_handler handler,
                                         uacpi_handle ctx)
 {
-    // No scheduler, execute immediately
-    handler(ctx);
+    thread_create(handler, ctx);
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_wait_for_work_completion(void)
 {
-    // No async work, so it's always complete
-    return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_install_interrupt_handler(

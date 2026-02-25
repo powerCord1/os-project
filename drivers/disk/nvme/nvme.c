@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <timer.h>
+#include <vmm.h>
 
 static nvme_controller_t controller;
 
@@ -249,14 +250,23 @@ void nvme_init(disk_driver_t *driver)
                 controller.pci_dev.function);
 
     // Get BAR0 and map registers
-    uint64_t bar0 = pci_get_bar_address(&controller.pci_dev, 0);
-    controller.regs = (nvme_regs_t *)bar0; // Assumes identity mapping
+    uint64_t bar0_phys = pci_get_bar_address(&controller.pci_dev, 0);
+
+    size_t reg_size = 0x1000; // 4KB is standard for NVMe register sets
+    controller.regs = (nvme_regs_t *)mmap_physical(
+        NULL, (void *)bar0_phys, reg_size, VMM_PRESENT | VMM_WRITE);
+
+    if (controller.regs == NULL) {
+        log_err("NVMe: Failed to map controller registers to virtual memory");
+        return;
+    }
 
     // Enable PCI bus mastering
     uint32_t pci_cmd_reg =
         pci_read_dword(controller.pci_dev.bus, controller.pci_dev.device,
                        controller.pci_dev.function, 0x04);
     pci_cmd_reg |= (1 << 2); // Bus Master Enable
+    pci_cmd_reg |= (1 << 1); // Memory Space Enable
     pci_write_dword(controller.pci_dev.bus, controller.pci_dev.device,
                     controller.pci_dev.function, 0x04, pci_cmd_reg);
 
@@ -316,8 +326,9 @@ void nvme_init(disk_driver_t *driver)
         wait_ms(1);
     }
 
+    // TODO: fix error here
     if (!(controller.regs->csts & CSTS_RDY)) {
-        log_err("NVMe controller failed to become ready.");
+        log_err("NVMe controller failed to initialise.");
         free(controller.admin_sq);
         free(controller.admin_cq);
         return;

@@ -3,6 +3,45 @@
 
 #define cpu_pause() __asm__ volatile("pause")
 
+// CPUID leaves
+#define CPUID_LEAF_VENDOR_ID 0
+#define CPUID_LEAF_APIC 1
+
+// Vendor strings from CPUs.
+#define CPUID_VENDOR_AMD "AuthenticAMD"
+#define CPUID_VENDOR_AMD_OLD "AMDisbetter!"
+#define CPUID_VENDOR_INTEL "GenuineIntel"
+#define CPUID_VENDOR_VIA "VIA VIA VIA "
+#define CPUID_VENDOR_TRANSMETA "GenuineTMx86"
+#define CPUID_VENDOR_TRANSMETA_OLD "TransmetaCPU"
+#define CPUID_VENDOR_CYRIX "CyrixInstead"
+#define CPUID_VENDOR_CENTAUR "CentaurHauls"
+#define CPUID_VENDOR_NEXGEN "NexGenDriven"
+#define CPUID_VENDOR_UMC "UMC UMC UMC "
+#define CPUID_VENDOR_SIS "SiS SiS SiS "
+#define CPUID_VENDOR_NSC "Geode by NSC"
+#define CPUID_VENDOR_RISE "RiseRiseRise"
+#define CPUID_VENDOR_VORTEX "Vortex86 SoC"
+#define CPUID_VENDOR_AO486 "MiSTer AO486"
+#define CPUID_VENDOR_AO486_OLD "GenuineAO486"
+#define CPUID_VENDOR_ZHAOXIN "  Shanghai  "
+#define CPUID_VENDOR_HYGON "HygonGenuine"
+#define CPUID_VENDOR_ELBRUS "E2K MACHINE "
+
+// Vendor strings from hypervisors.
+#define CPUID_VENDOR_QEMU "TCGTCGTCGTCG"
+#define CPUID_VENDOR_KVM " KVMKVMKVM  "
+#define CPUID_VENDOR_VMWARE "VMwareVMware"
+#define CPUID_VENDOR_VIRTUALBOX "VBoxVBoxVBox"
+#define CPUID_VENDOR_XEN "XenVMMXenVMM"
+#define CPUID_VENDOR_HYPERV "Microsoft Hv"
+#define CPUID_VENDOR_PARALLELS " prl hyperv "
+#define CPUID_VENDOR_PARALLELS_ALT                                             \
+    " lrpepyh vr " // Sometimes Parallels incorrectly encodes "prl hyperv" as
+                   // "lrpepyh vr" due to an endianness mismatch.
+#define CPUID_VENDOR_BHYVE "bhyve bhyve "
+#define CPUID_VENDOR_QNX " QNXQVMBSQG "
+
 // RFLAGS
 typedef union {
     uint64_t raw;
@@ -104,7 +143,6 @@ void cpu_init();
 void enable_mce();
 void sse_init();
 void tsc_init();
-bool is_apic_enabled();
 uint64_t get_ts();
 void enable_a20();
 cr0_t get_cr0();
@@ -117,3 +155,5 @@ void set_cr2(cr2_t cr2);
 void set_cr3(cr3_t cr3);
 void set_cr4(cr4_t cr4);
 void set_rflags(rflags_t rflags);
+void get_vendor_id();
+bool is_apic_enabled();

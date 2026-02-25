@@ -43,7 +43,7 @@ endif
 # Base CFLAGS that work on all architectures
 CFLAGS = -std=gnu99 \
 		 -ffreestanding \
-		 -O2 \
+		 -O0 \
 		 -Wall \
 		 -Wextra \
 		 -DBUILD_VERSION="\"$(BUILD_VERSION)\"" \
@@ -56,7 +56,8 @@ CFLAGS = -std=gnu99 \
 		 -fno-lto \
 		 -fdata-sections \
 		 -ffunction-sections \
-		 -no-pie
+		 -no-pie \
+		 -g
 
 # Architecture-specific flags (only for x86_64)
 # When targeting x86_64, we MUST use a cross-compiler because:
@@ -107,20 +108,18 @@ C_OBJECTS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(C_SOURCES))
 ASM_OBJECTS = $(patsubst $(SRCDIR)/%.s,$(BUILDDIR)/%.o,$(ASM_SOURCES))
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
+QEMU_PREFIX = -enable-kvm -machine q35,acpi=on -cpu host -display sdl -serial stdio -drive format=raw,file=disk.img,if=ide -boot d
+
 all: $(TARGET)
 
 run: $(ISO_TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -machine q35,acpi=on -cpu host -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -drive format=raw,file=disk.img,if=ide -boot d
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
 run_noaudio: $(TARGET)
-	@echo "Note: Using multiboot protocol. If this fails, try 'make run_cdrom' instead."
-	qemu-system-x86_64 -kernel $(TARGET) -display sdl -serial stdio
-
-run_noaudio_cdrom: $(ISO_TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) -display sdl -serial stdio
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX)
 
 run_debug: $(TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) -enable-kvm -machine q35,acpi=on -cpu host -display sdl -serial stdio -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -drive format=raw,file=disk.img,if=ide -boot d -s -S
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -s -S &
 
 data/%.c: data/%
 	@echo "Generating C source for $<..."

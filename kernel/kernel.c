@@ -18,21 +18,10 @@
 #include <scheduler.h>
 #include <stdio.h>
 
-void main(unsigned long magic, unsigned long addr)
+void main()
 {
-    struct multiboot_tag *tag;
-
     sys_init();
-
-    if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
-        log_info("Booted via multiboot2.");
-        for (tag = (struct multiboot_tag *)(addr + 8);
-             tag->type != MULTIBOOT_TAG_TYPE_END;
-             tag = (struct multiboot_tag *)((uint8_t *)tag +
-                                            ((tag->size + 7) & ~7))) {
-            log_verbose("Tag 0x%x, Size 0x%x", tag->type, tag->size);
-        }
-    }
+    log_info("Kernel initialized");
 
     log_verbose("Init done, entering main menu...");
     while (1) {

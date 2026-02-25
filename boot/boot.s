@@ -31,9 +31,6 @@ stack_top:
 _start:
 	mov $stack_top, %rsp
 
-    push %rbx
-    push %rax
-
 	call main
     call main_exit
 
