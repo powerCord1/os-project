@@ -11,11 +11,11 @@ typedef struct app {
 #define DECLARE_APP(_name, identifier)                                         \
     void identifier##_main();                                                  \
     void identifier##_exit();                                                  \
-    static const app_t identifier##_app_entry = {                              \
-        .name = _name,                                                         \
-        .main = identifier##_main,                                             \
-        .exit = identifier##_exit,                                             \
-    }
+    // static const app_t identifier##_app_entry = { \
+    //     .name = _name, \
+    //     .main = identifier##_main, \
+    //     .exit = identifier##_exit, \
+    // }
 
 DECLARE_APP("Typewriter", typewriter);
 DECLARE_APP("Key notes", key_notes);

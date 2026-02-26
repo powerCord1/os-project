@@ -2,16 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug QEMU",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/os.bin",
-            "miDebuggerPath": "/usr/bin/gdb",
-            "miDebuggerServerAddress": "localhost:1234",
-            "preLaunchTask": "Build and run with debugging",
-            "stopAtEntry": true,
-            "cwd": "${workspaceFolder}",
-            "MIMode": "gdb"
-        }
+            "type": "gdb",
+            "request": "attach",
+            "name": "Attach to gdbserver",
+            "executable": "${cwd}/build/os.bin",
+            "target": ":1234",
+            "remote": true,
+            "cwd": "${workspaceRoot}",
+            "valuesFormatting": "parseText"
+        },
     ]
 }

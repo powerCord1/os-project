@@ -44,6 +44,10 @@ int vprintf_generic(int (*putc_func)(int, void *), void *putc_data,
 {
     int written = 0;
 
+    if (!format) {
+        return 0;
+    }
+
     while (*format != '\0') {
         size_t maxrem = INT_MAX - written;
 

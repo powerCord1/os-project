@@ -8,6 +8,7 @@
 #include <io.h>
 #include <sound.h>
 #include <stdio.h>
+#include <string.h>
 #include <timer.h>
 
 static uint64_t tsc_freq_hz = 0;
@@ -26,7 +27,9 @@ void cpu_init()
     sse_init();
     enable_a20();
     enable_mce();
-    get_vendor_id();
+    set_cpu_vendor_id(cpu_vendor_id);
+    set_cpu_model_name(cpu_model_name);
+    log_verbose("Vendor ID: %s\nModel Name: %s", cpu_vendor_id, cpu_model_name);
 }
 
 void halt()
@@ -245,26 +248,49 @@ void set_rflags(rflags_t rflags)
 
 // TODO: make a function to get and set cr value to prevent repetitive code
 
-void get_vendor_id()
-{
-    uint32_t eax;
-    uint32_t ebx;
-    uint32_t ecx;
-    uint32_t edx;
-    char vendor_id[12];
-
-    __cpuid(CPUID_LEAF_VENDOR_ID, eax, ebx, ecx, edx);
-    *(uint32_t *)(vendor_id + 0) = ebx;
-    *(uint32_t *)(vendor_id + 4) = edx;
-    *(uint32_t *)(vendor_id + 8) = ecx;
-    vendor_id[12] = '\0';
-
-    log_verbose("CPUID: Vendor ID: %s", vendor_id);
-}
-
 bool is_apic_enabled()
 {
     unsigned int eax, ebx, ecx, edx;
     __cpuid(CPUID_LEAF_APIC, eax, ebx, ecx, edx);
     return (edx & (1 << 9));
+}
+
+static void set_cpu_vendor_id(char *buffer)
+{
+    uint32_t eax, ebx, ecx, edx;
+    __cpuid(CPUID_LEAF_VENDOR_ID, eax, ebx, ecx, edx);
+
+    *(uint32_t *)(buffer + 0) = ebx;
+    *(uint32_t *)(buffer + 4) = edx;
+    *(uint32_t *)(buffer + 8) = ecx;
+    buffer[12] = '\0';
+}
+
+static void set_cpu_model_name(char *buffer)
+{
+    uint32_t regs[4];
+    uint32_t *ptr = (uint32_t *)buffer;
+
+    // Check if extended functions are available
+    __cpuid(0x80000000, regs[0], regs[1], regs[2], regs[3]);
+    if (regs[0] < 0x80000004) {
+        // Fallback if the brand string isn't supported
+        for (int i = 0; i < 11; i++) {
+            buffer[i] = "Unknown CPU"[i];
+        }
+        return;
+    }
+
+    // Brand string is spread across three CPUID leaves
+    for (uint32_t leaf = 0x80000002; leaf <= 0x80000004; leaf++) {
+        __cpuid(leaf, regs[0], regs[1], regs[2], regs[3]);
+
+        // Copy into buffer
+        for (int i = 0; i < 4; i++) {
+            *ptr++ = regs[i];
+        }
+    }
+
+    // Null-terminate (buffer must be at least 49 bytes)
+    buffer[48] = '\0';
 }

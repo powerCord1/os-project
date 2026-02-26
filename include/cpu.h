@@ -134,6 +134,9 @@ typedef union {
     } bit_list;
 } cr4_t;
 
+char cpu_vendor_id[12];
+char cpu_model_name[48];
+
 void halt();
 __attribute__((noreturn)) void halt_cf();
 char get_cpu_vendor();
@@ -155,5 +158,6 @@ void set_cr2(cr2_t cr2);
 void set_cr3(cr3_t cr3);
 void set_cr4(cr4_t cr4);
 void set_rflags(rflags_t rflags);
-void get_vendor_id();
 bool is_apic_enabled();
+static void set_cpu_vendor_id(char *buffer);
+static void set_cpu_model_name(char *buffer);
