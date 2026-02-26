@@ -112,6 +112,8 @@ void cmd_sysinfo(int argc, char **argv)
 
     printf("APIC:   %s\n\n", is_apic_enabled() ? "enabled" : "disabled");
     print_build_info();
+
+    printf("\nCPU model: %s\n", cpu_model_name);
 }
 
 void cmd_meminfo(int argc, char **argv)

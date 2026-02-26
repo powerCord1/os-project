@@ -134,8 +134,8 @@ typedef union {
     } bit_list;
 } cr4_t;
 
-char cpu_vendor_id[12];
-char cpu_model_name[48];
+extern char cpu_vendor_id[12];
+extern char cpu_model_name[49];
 
 void halt();
 __attribute__((noreturn)) void halt_cf();

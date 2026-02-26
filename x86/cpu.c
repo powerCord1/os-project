@@ -14,6 +14,9 @@
 static uint64_t tsc_freq_hz = 0;
 static uint64_t tsc_at_boot = 0;
 
+char cpu_vendor_id[12];
+char cpu_model_name[49];
+
 static inline uint64_t rdtsc()
 {
     uint32_t lo, hi;
@@ -291,6 +294,6 @@ static void set_cpu_model_name(char *buffer)
         }
     }
 
-    // Null-terminate (buffer must be at least 49 bytes)
+    // Null-terminate
     buffer[48] = '\0';
 }

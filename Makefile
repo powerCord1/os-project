@@ -57,7 +57,7 @@ CFLAGS = -std=gnu99 \
 		 -fdata-sections \
 		 -ffunction-sections \
 		 -no-pie \
-		 -g
+		 -g3
 
 # Architecture-specific flags (only for x86_64)
 # When targeting x86_64, we MUST use a cross-compiler because:

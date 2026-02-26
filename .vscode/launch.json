@@ -9,7 +9,8 @@
             "target": ":1234",
             "remote": true,
             "cwd": "${workspaceRoot}",
-            "valuesFormatting": "parseText"
+            "valuesFormatting": "parseText",
+            "stopAtConnect": true
         },
     ]
 }

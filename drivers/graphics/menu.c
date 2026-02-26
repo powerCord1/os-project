@@ -34,13 +34,13 @@ void create_menu(const char *title, const char *prompt, menu_t *menu,
             if (cur_index > 0) {
                 cur_index--;
             } else {
-                goto wait_for_key;
+                cur_index = item_count - 1;
             }
         } else if (keypress.scancode == KEY_ARROW_DOWN) {
             if (cur_index < item_count - 1) {
                 cur_index++;
             } else {
-                goto wait_for_key;
+                cur_index = 0;
             }
         } else if (keypress.scancode == KEY_ENTER) {
             fb_clear();
