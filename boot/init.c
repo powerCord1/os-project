@@ -3,6 +3,7 @@
 #include <ata.h>
 #include <cpu.h>
 #include <debug.h>
+#include <fat32.h>
 #include <font.h>
 #include <framebuffer.h>
 #include <fs.h>
@@ -44,6 +45,7 @@ boot_task_t boot_tasks[] = {
 #if ACPI_ENABLED
     {.msg = "Init ACPI", .func = acpi_init},
 #endif
+    {.msg = "Register filesystem drivers", .func = fat32_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init keyboard", .func = kbd_init},
     {.msg = "Init scheduler", .func = scheduler_init},

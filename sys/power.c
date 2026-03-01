@@ -60,7 +60,7 @@ __attribute__((noreturn)) void shutdown()
 void do_shutdown_calls()
 {
     disable_interrupts();
-    if (!fat32_unmount()) {
+    if (!vfs_unmount()) {
         log_err("Failed to unmount filesystems");
     }
 }

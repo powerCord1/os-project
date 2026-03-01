@@ -42,7 +42,6 @@ extern uint8_t cmd_count;
 extern bool exit;
 extern char *command_history[MAX_HISTORY];
 extern int history_count;
-static fat32_fs_t *mounted_fs;
 
 void shell_main();
 void process_cmd(char *cmd);
