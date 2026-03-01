@@ -22,7 +22,10 @@ void main_menu()
 void power_menu()
 {
     log_info("Entering power menu");
-    menu_t options[] = {{"Reboot", &reboot}, {"Shutdown", &shutdown}};
+    menu_t options[] = {
+        {"Reboot", &sys_reboot},
+        {"Shutdown", &sys_shutdown},
+    };
     create_menu("Power menu", "Select an option:", options,
                 ARRAY_SIZE(options));
 }

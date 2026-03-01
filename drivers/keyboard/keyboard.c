@@ -140,10 +140,10 @@ uint64_t keyboard_handler(uint64_t rsp)
             fb_char_test();
             break;
         case KEY_F6:
-            reboot();
+            sys_reboot();
             break;
         case KEY_F7:
-            shutdown();
+            sys_shutdown();
             break;
         case KEY_F8:
             panic("manually triggered panic");

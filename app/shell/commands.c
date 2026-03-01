@@ -80,12 +80,12 @@ void cmd_date(int argc, char **argv)
 
 void cmd_shutdown(int argc, char **argv)
 {
-    shutdown();
+    sys_shutdown();
 }
 
 void cmd_reboot(int argc, char **argv)
 {
-    reboot();
+    sys_reboot();
 }
 
 void cmd_sound_test(int argc, char **argv)
