@@ -165,14 +165,6 @@ void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color)
         return;
     }
 #endif
-    // Ensure the cursor doesn't get overwritten - instead, change the value of
-    // the pixel under the cursor
-    if (cursor.visible && x >= cursor.x && x < cursor.x + char_width &&
-        y == cursor.y + char_height - 1) {
-        cursor.under[x - cursor.x] = color;
-        return;
-    }
-    // fb_put_pixel(cursor.x + i, cursor.y + char_height - 1, fg);
     fb_ptr[y * pitch_in_pixels + x] = color;
 #if SLOWMO
     if (is_system_initialised) {
@@ -195,9 +187,27 @@ uint32_t fb_get_pixel(uint32_t x, uint32_t y)
 void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                   uint32_t color)
 {
-    for (uint32_t i = 0; i < height; i++) {
-        for (uint32_t j = 0; j < width; j++) {
-            fb_put_pixel(x + j, y + i, color);
+    uint32_t x_start = x;
+    uint32_t y_start = y;
+    uint32_t x_end = x + width;
+    uint32_t y_end = y + height;
+
+    if (x_start >= fb->width || y_start >= fb->height) {
+        return;
+    }
+
+    if (x_end > fb->width) {
+        x_end = fb->width;
+    }
+    if (y_end > fb->height) {
+        y_end = fb->height;
+    }
+
+    uint32_t draw_width = x_end - x_start;
+
+    for (uint32_t i = y_start; i < y_end; i++) {
+        for (uint32_t j = 0; j < draw_width; j++) {
+            fb_ptr[i * pitch_in_pixels + x_start + j] = color;
         }
     }
 }
@@ -466,11 +476,7 @@ void fb_scroll()
     memmove(fb_ptr, fb_ptr + char_height * pitch_in_pixels,
             (fb->height - char_height) * fb->pitch);
 
-    for (uint32_t y = fb->height - char_height; y < fb->height; y++) {
-        for (uint32_t x = 0; x < fb->width; x++) {
-            fb_put_pixel(x, y, bg);
-        }
-    }
+    fb_draw_rect(0, fb->height - char_height, fb->width, char_height, bg);
     if (was_cursor_visible) {
         fb_draw_cursor();
     }
@@ -478,13 +484,7 @@ void fb_scroll()
 
 void fb_fill_screen(uint32_t color)
 {
-    // TODO: use memset to fill screen
-
-    for (uint32_t y = 0; y < fb->height; y++) {
-        for (uint32_t x = 0; x < fb->width; x++) {
-            fb_put_pixel(x, y, color);
-        }
-    }
+    fb_draw_rect(0, 0, fb->width, fb->height, color);
 }
 
 void fb_matrix_test()

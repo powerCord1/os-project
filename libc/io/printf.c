@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include <framebuffer.h>
 #include <string.h>
 #include <tty.h>
 
