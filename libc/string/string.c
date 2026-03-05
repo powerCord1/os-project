@@ -9,22 +9,42 @@
 
 void *memmove(void *dest, const void *src, size_t n)
 {
-    unsigned char *d = dest;
-    const unsigned char *s = src;
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
 
-    if (d == s) {
+    if (d == s || n == 0) {
         return dest;
     }
 
+    // Use a word size suitable for the architecture (e.g., uint64_t for 64-bit)
+    typedef uint64_t word_t;
+    const size_t word_size = sizeof(word_t);
+
     if (d < s) {
-        // copy forwards
-        for (size_t i = 0; i < n; i++) {
-            d[i] = s[i];
+        // Forward copy: copy words where possible
+        while (n >= word_size) {
+            *(word_t *)d = *(const word_t *)s;
+            d += word_size;
+            s += word_size;
+            n -= word_size;
+        }
+        // Copy remaining bytes
+        while (n--) {
+            *d++ = *s++;
         }
     } else {
-        // copy backwards
-        for (size_t i = n; i != 0; i--) {
-            d[i - 1] = s[i - 1];
+        // Backward copy: start from the end to handle overlap safely
+        d += n;
+        s += n;
+        while (n >= word_size) {
+            d -= word_size;
+            s -= word_size;
+            n -= word_size;
+            *(word_t *)d = *(const word_t *)s;
+        }
+        // Copy remaining bytes
+        while (n--) {
+            *--d = *--s;
         }
     }
 
