@@ -7,6 +7,7 @@
 #define LOGLEVEL_VERBOSE 4
 
 #define LOGLEVEL 4
+#define LOG_TO_TTY false
 
 #define DEBUG true
 

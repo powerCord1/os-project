@@ -112,3 +112,13 @@ __attribute__((noreturn)) void sys_reset()
 {
     outb(0x64, 0xFE);
 }
+
+int get_battery_percentage()
+{
+    uacpi_namespace_node *battery_node = acpi_find_system_battery();
+    if (battery_node == NULL) {
+        log_err("Failed to find system battery node");
+        return -1;
+    }
+    return acpi_get_battery_percentage(battery_node);
+}

@@ -13,9 +13,15 @@ static void write_log(uint8_t type, const char *color, const char *format,
                       va_list args)
 {
     if (type <= LOGLEVEL) {
+#if LOG_TO_TTY
+        printf("%s: ", get_log_text(type));
+        vprintf(format, args);
+        printf("\n");
+#else
         serial_printf("%s%s%s: ", color, get_log_text(type), ansi_color.nc);
         vserial_printf(format, args);
         serial_writestring("\n");
+#endif
     }
 }
 

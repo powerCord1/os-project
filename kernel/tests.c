@@ -1,5 +1,6 @@
 #include <stddef.h>
 
+#include <acpi.h>
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
@@ -216,4 +217,16 @@ void page_fault_test()
 {
     __asm__ volatile("mov $0xDEADBEEF, %rbx\n"
                      "movb $0xFF, (%rbx)\n");
+}
+
+void invalid_opcode_test()
+{
+    __asm__ volatile("ud2");
+}
+
+void list_acpi_devices()
+{
+    acpi_list_acpi_devices();
+    while (kbd_get_key(true).scancode != KEY_ESC)
+        ;
 }

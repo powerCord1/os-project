@@ -307,6 +307,9 @@ void register_exceptions()
 {
     exception_install_handler(14, page_fault_handler);
     exception_install_handler(8, double_fault_handler);
+    exception_install_handler(13, gpf_handler);
+    exception_install_handler(12, seg_fault_handler);
+    exception_install_handler(6, invalid_opcode_handler);
 }
 
 void idt_load()

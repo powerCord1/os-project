@@ -119,7 +119,7 @@ run_noaudio: $(TARGET)
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX)
 
 run_debug: $(TARGET)
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -s -S &
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -s -S
 
 data/%.c: data/%
 	@echo "Generating C source for $<..."

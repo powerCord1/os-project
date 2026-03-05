@@ -1,5 +1,6 @@
 #include <stdbool.h>
 
+#include <acpi.h>
 #include <ata.h>
 #include <cmos.h>
 #include <cpu.h>
@@ -114,6 +115,13 @@ void cmd_sysinfo(int argc, char **argv)
     print_build_info();
 
     printf("\nCPU model: %s\n", cpu_model_name);
+    int battery_percentage = get_battery_percentage();
+    if (battery_percentage == -1) {
+        printf("Failed to get battery percentage\n");
+    } else {
+        printf("Battery percentage: %d%%\n", battery_percentage);
+    }
+    printf("CPU temperature: %.2f°C\n", acpi_get_cpu_temp(false));
 }
 
 void cmd_meminfo(int argc, char **argv)

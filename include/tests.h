@@ -12,6 +12,8 @@ void random_test();
 void heap_test();
 void bmp_test();
 void page_fault_test();
+void invalid_opcode_test();
+void list_acpi_devices();
 
 static const menu_t tests[] = {
     {"Thread test", &thread_test},
@@ -22,4 +24,8 @@ static const menu_t tests[] = {
     {"RNG test", &random_test},
     {"BMP test", &bmp_test},
     {"Trigger page fault", &page_fault_test},
+    {"Execute invalid opcode", &invalid_opcode_test},
+    {"Sin wave test", &sin_test},
+    {"Heap test", &heap_test},
+    {"List all ACPI devices", &list_acpi_devices},
 };

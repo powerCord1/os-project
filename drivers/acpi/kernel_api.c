@@ -381,6 +381,8 @@ uacpi_status uacpi_kernel_schedule_work(uacpi_work_type,
 
 uacpi_status uacpi_kernel_wait_for_work_completion(void)
 {
+    wait_ms(100); // TODO: an actual implementation of this function
+    return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_install_interrupt_handler(

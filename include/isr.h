@@ -72,3 +72,6 @@ static const char *exceptions[] = {
 
 void page_fault_handler(interrupt_frame_t *frame);
 void double_fault_handler(interrupt_frame_t *frame);
+void gpf_handler(interrupt_frame_t *frame);
+void seg_fault_handler(interrupt_frame_t *frame);
+void invalid_opcode_handler(interrupt_frame_t *frame);

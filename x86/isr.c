@@ -169,4 +169,20 @@ void page_fault_handler(interrupt_frame_t *frame)
 
 void double_fault_handler(interrupt_frame_t *frame)
 {
+    panic("Double fault");
+}
+
+void gpf_handler(interrupt_frame_t *frame)
+{
+    panic("General protection fault");
+}
+
+void seg_fault_handler(interrupt_frame_t *frame)
+{
+    panic("Segment fault");
+}
+
+void invalid_opcode_handler(interrupt_frame_t *frame)
+{
+    panic("Invalid opcode");
 }
