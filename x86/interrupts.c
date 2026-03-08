@@ -22,6 +22,9 @@
 
 #define VECTOR_TABLE_SIZE 48
 
+struct irq_handler_entry *irq_handlers[16];
+void (*exception_handlers[32])(interrupt_frame_t *);
+
 idt_entry_t idt[IDT_ENTRIES];
 idtr_t idtr;
 
