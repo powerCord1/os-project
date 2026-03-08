@@ -1,5 +1,6 @@
 #include <cmos.h>
 #include <io.h>
+#include <time.h>
 
 #define CMOS_REG_SECOND 0x00
 #define CMOS_REG_MINUTE 0x02

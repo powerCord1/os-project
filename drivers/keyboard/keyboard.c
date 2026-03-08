@@ -10,6 +10,7 @@
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
+#include <stdio.h>
 #include <timer.h>
 
 static volatile char last_char = 0;
@@ -30,8 +31,10 @@ void kbd_init()
     log_verbose("Setting typematic rate, rate: %d, delay: %d",
                 KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
     kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
+    log_verbose("Installing keyboard handler");
     irq_install_handler(IRQ_TYPE_KEYBOARD,
                         (uint64_t (*)(uint64_t, void *))keyboard_handler, NULL);
+    log_verbose("Keyboard initialised");
 }
 
 uint8_t get_key()
@@ -51,6 +54,7 @@ void kbd_update_leds()
     if (kbd_modifiers.caps_lock) {
         data |= 4;
     }
+    kbd_send_led_cmd(data);
 }
 
 void kbd_send_led_cmd(uint8_t data)
@@ -80,8 +84,23 @@ void kbd_set_typematic_rate(uint8_t rate, uint8_t delay)
 
 void wait_for_kbd()
 {
-    while ((inb(KBD_STATUS_PORT) & 2) != 0)
-        ;
+    uint64_t start_ts = get_ts();
+    uint8_t status;
+    while (((status = inb(KBD_STATUS_PORT)) & 2) != 0) {
+        // If the Output Buffer is full, the 8042 might block.
+        // Drain it so we can send our next byte.
+        if (status & 1) {
+            inb(KBD_DATA_PORT);
+        }
+
+        if (get_ts() - start_ts > 100000000) { // 100ms timeout
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+                     "Timed out waiting for keyboard (status: 0x%02x)", status);
+            panic(buf);
+        }
+        cpu_pause();
+    }
 }
 
 uint64_t keyboard_handler(uint64_t rsp)

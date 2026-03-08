@@ -13,6 +13,7 @@
 #include <interrupts.h>
 #include <keyboard.h>
 #include <limine.h>
+#include <mouse.h>
 #include <pit.h>
 #include <pmm.h>
 #include <scheduler.h>
@@ -47,6 +48,7 @@ boot_task_t boot_tasks[] = {
 #endif
     {.msg = "Register filesystem drivers", .func = fat32_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
+    {.msg = "Init mouse", .func = mouse_init},
     {.msg = "Init keyboard", .func = kbd_init},
     {.msg = "Init scheduler", .func = scheduler_init},
 };

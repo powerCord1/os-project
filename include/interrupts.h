@@ -18,8 +18,8 @@ void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
 uint64_t irq_dispatch(uint64_t rsp, uint8_t irq);
 void register_exceptions();
 
-static struct irq_handler_entry *irq_handlers[16];
-static void (*exception_handlers[32])(interrupt_frame_t *);
+extern struct irq_handler_entry *irq_handlers[16];
+extern void (*exception_handlers[32])(interrupt_frame_t *);
 
 struct irq_handler_entry {
     uint64_t (*handler)(uint64_t, void *);

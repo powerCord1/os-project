@@ -28,7 +28,7 @@
 __attribute__((noreturn)) void sys_reboot()
 {
     fb_clear();
-    printf("Rebooting...");
+    printf("Rebooting...\n");
     log_info("Rebooting...");
     wait_for_render();
     do_shutdown_calls();
@@ -46,7 +46,7 @@ __attribute__((noreturn)) void sys_reboot()
 __attribute__((noreturn)) void sys_shutdown()
 {
     fb_clear();
-    printf("Shutting down...");
+    printf("Shutting down...\n");
     log_info("Shutting down...");
     wait_for_render();
     do_shutdown_calls();
