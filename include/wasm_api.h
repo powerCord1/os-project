@@ -20,16 +20,28 @@
 #define WASM_SEEK_CUR 1
 #define WASM_SEEK_END 2
 
+typedef enum {
+    FD_NONE,
+    FD_CONSOLE,
+    FD_FILE,
+    FD_PIPE_READ,
+    FD_PIPE_WRITE
+} fd_type_t;
+
 typedef struct {
-    bool in_use;
-    uint8_t *data;
-    uint32_t size;
-    uint32_t pos;
-    uint32_t flags;
-    bool writable;
-    bool dirty;
-    uint32_t parent_cluster;
-    char filename[12];
+    fd_type_t type;
+    union {
+        struct {
+            uint8_t *data;
+            uint32_t size, pos, flags;
+            bool writable, dirty;
+            uint32_t parent_cluster;
+            char filename[12];
+        } file;
+        struct {
+            int pipe_id;
+        } pipe;
+    };
 } wasm_fd_t;
 
 typedef struct wasm_process {

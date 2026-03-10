@@ -150,8 +150,13 @@ uint64_t keyboard_handler(uint64_t rsp)
             char ch = last_char;
             if (kbd_modifiers.ctrl) {
                 ch = ch & 0x1f;
-            } else if (kbd_modifiers.shift || kbd_modifiers.caps_lock) {
-                ch = kbd_capitalise(ch);
+            } else if (kbd_modifiers.shift) {
+                char shifted = scancode_shift_map[key];
+                if (shifted)
+                    ch = shifted;
+            } else if (kbd_modifiers.caps_lock) {
+                if (ch >= 'a' && ch <= 'z')
+                    ch -= 32;
             }
             kbd_buffer_push(ch);
         }
@@ -197,8 +202,13 @@ key_t kbd_get_key(bool wait)
     if (kbd_is_modifier_key(last_scancode) || last_key.key == 0) {
         return last_key;
     }
-    if (kbd_modifiers.shift || kbd_modifiers.caps_lock) {
-        last_key.key = kbd_capitalise(last_key.key);
+    if (kbd_modifiers.shift) {
+        char shifted = scancode_shift_map[last_scancode];
+        if (shifted)
+            last_key.key = shifted;
+    } else if (kbd_modifiers.caps_lock) {
+        if (last_key.key >= 'a' && last_key.key <= 'z')
+            last_key.key -= 32;
     }
     return last_key;
 }

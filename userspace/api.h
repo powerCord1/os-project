@@ -42,6 +42,23 @@ extern int waitpid(int pid) WASM_IMPORT(waitpid);
 extern int kill(int pid) WASM_IMPORT(kill);
 extern int getpid(void) WASM_IMPORT(getpid);
 
+/* Pipes & Redirection */
+extern int dup2(int oldfd, int newfd) WASM_IMPORT(dup2);
+extern int pipe(int *fds) WASM_IMPORT(pipe);
+extern int pipe_create(void) WASM_IMPORT(pipe_create);
+extern int pipe_close_read(int pipe_id) WASM_IMPORT(pipe_close_read);
+extern int pipe_close_write(int pipe_id) WASM_IMPORT(pipe_close_write);
+extern int spawn_redirected(const char *path, int path_len, const char *args,
+                            int args_len, int argc, const void *redir_buf,
+                            int redir_len) WASM_IMPORT(spawn_redirected);
+
+#define FD_SETUP_NONE        0
+#define FD_SETUP_PIPE_READ   1
+#define FD_SETUP_PIPE_WRITE  2
+#define FD_SETUP_FILE_READ   3
+#define FD_SETUP_FILE_WRITE  4
+#define FD_SETUP_FILE_APPEND 5
+
 /* Helpers */
 
 static int strlen(const char *s)
@@ -128,4 +145,21 @@ static int spawn_cmd(const char *path, char **argv, int argc)
         args_buf[pos++] = '\0';
     }
     return spawn(path, strlen(path), args_buf, pos, argc);
+}
+
+static int spawn_cmd_redirected(const char *path, char **argv, int argc,
+                                const void *redir_buf, int redir_len)
+{
+    char args_buf[512];
+    int pos = 0;
+    for (int i = 0; i < argc; i++) {
+        int len = strlen(argv[i]);
+        if (pos + len + 1 > (int)sizeof(args_buf))
+            break;
+        for (int j = 0; j < len; j++)
+            args_buf[pos++] = argv[i][j];
+        args_buf[pos++] = '\0';
+    }
+    return spawn_redirected(path, strlen(path), args_buf, pos, argc,
+                            redir_buf, redir_len);
 }

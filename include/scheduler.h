@@ -23,3 +23,6 @@ void scheduler_yield();
 uint64_t scheduler_schedule(uint64_t current_rsp);
 void scheduler_start();
 void thread_cancel(uint64_t id);
+uint64_t scheduler_get_current_id(void);
+void scheduler_block_current(void);
+void scheduler_unblock(uint64_t id);

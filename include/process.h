@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <waitqueue.h>
 
 #define PROC_MAX 16
 
@@ -21,6 +22,7 @@ typedef struct {
     volatile bool killed;
     uint64_t thread_id;
     wasm_process_t *wasm_proc;
+    waitqueue_t exit_wq;
 } proc_entry_t;
 
 void proc_table_init(void);
@@ -29,3 +31,4 @@ proc_entry_t *proc_get(int32_t pid);
 void proc_free(int32_t pid);
 int32_t proc_foreground_pid(void);
 void proc_set_foreground(int32_t pid);
+void proc_mark_exited(int32_t pid, int32_t exit_code);

@@ -152,6 +152,33 @@ void thread_cancel(uint64_t id)
     enable_interrupts();
 }
 
+uint64_t scheduler_get_current_id(void)
+{
+    return current_thread ? current_thread->id : 0;
+}
+
+void scheduler_block_current(void)
+{
+    if (current_thread)
+        current_thread->state = THREAD_STATE_BLOCKED;
+}
+
+void scheduler_unblock(uint64_t id)
+{
+    disable_interrupts();
+    thread_t *thread = ready_list;
+    if (thread) {
+        do {
+            if (thread->id == id && thread->state == THREAD_STATE_BLOCKED) {
+                thread->state = THREAD_STATE_READY;
+                break;
+            }
+            thread = thread->next;
+        } while (thread != ready_list);
+    }
+    enable_interrupts();
+}
+
 void wait_for_thread(uint64_t id)
 {
     while (true) {
