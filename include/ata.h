@@ -1,20 +1,9 @@
+#pragma once
+
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
-    uint8_t boot_flags;
-    uint8_t start_head;
-    uint8_t start_sector : 6;
-    uint8_t start_cylinder_high : 2;
-    uint8_t start_cylinder;
-    uint8_t type;
-    uint8_t end_head;
-    uint8_t end_sector : 6;
-    uint8_t end_cylinder_high : 2;
-    uint8_t end_cylinder;
-    uint32_t lba_start;
-    uint32_t num_sectors;
-} __attribute__((packed)) partition_entry_t;
+#include <disk.h>
 
 static void ata_wait_busy(uint8_t drive);
 static void ata_wait_drq(uint8_t drive);
