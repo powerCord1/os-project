@@ -16,6 +16,7 @@
 #include <mouse.h>
 #include <pit.h>
 #include <pmm.h>
+#include <process.h>
 #include <scheduler.h>
 #include <serial.h>
 #include <stdio.h>
@@ -51,6 +52,7 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init mouse", .func = mouse_init},
     {.msg = "Init keyboard", .func = kbd_init},
     {.msg = "Init scheduler", .func = scheduler_init},
+    {.msg = "Init process table", .func = proc_table_init},
 };
 
 boot_task_t late_boot_tasks[] = {

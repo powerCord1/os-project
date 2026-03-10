@@ -35,6 +35,13 @@ extern int mkdir(const char *path, int path_len) WASM_IMPORT(mkdir);
 extern int unlink(const char *path, int path_len) WASM_IMPORT(unlink);
 extern int rmdir(const char *path, int path_len) WASM_IMPORT(rmdir);
 
+/* Process */
+extern int spawn(const char *path, int path_len, const char *args,
+                 int args_len, int argc) WASM_IMPORT(spawn);
+extern int waitpid(int pid) WASM_IMPORT(waitpid);
+extern int kill(int pid) WASM_IMPORT(kill);
+extern int getpid(void) WASM_IMPORT(getpid);
+
 /* Helpers */
 
 static int strlen(const char *s)
@@ -106,4 +113,19 @@ static int unlink_path(const char *path)
 static int rmdir_path(const char *path)
 {
     return rmdir(path, strlen(path));
+}
+
+static int spawn_cmd(const char *path, char **argv, int argc)
+{
+    char args_buf[512];
+    int pos = 0;
+    for (int i = 0; i < argc; i++) {
+        int len = strlen(argv[i]);
+        if (pos + len + 1 > (int)sizeof(args_buf))
+            break;
+        for (int j = 0; j < len; j++)
+            args_buf[pos++] = argv[i][j];
+        args_buf[pos++] = '\0';
+    }
+    return spawn(path, strlen(path), args_buf, pos, argc);
 }

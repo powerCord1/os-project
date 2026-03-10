@@ -32,10 +32,11 @@ typedef struct {
     char filename[12];
 } wasm_fd_t;
 
-typedef struct {
+typedef struct wasm_process {
     int argc;
     char argv[WASM_MAX_ARGC][WASM_MAX_ARG_LEN];
     int32_t exit_code;
+    int32_t pid;
     wasm_fd_t fds[WASM_MAX_FDS];
 } wasm_process_t;
 

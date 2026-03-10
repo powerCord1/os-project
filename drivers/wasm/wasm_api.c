@@ -5,8 +5,10 @@
 #include <heap.h>
 #include <keyboard.h>
 #include <pit.h>
+#include <process.h>
 #include <scheduler.h>
 #include <wasm_api.h>
+#include <wasm_runner.h>
 
 #include "wasm3.h"
 #include "m3_env.h"
@@ -115,8 +117,18 @@ m3ApiRawFunction(wasm_api_getchar)
 {
     m3ApiReturnType(int32_t)
     char c;
-    while (!kbd_buffer_pop(&c))
+    while (!kbd_buffer_pop(&c)) {
+        proc_entry_t *e = proc_get(WASM_PROC(_ctx)->pid);
+        if (e && e->killed) {
+            WASM_PROC(_ctx)->exit_code = 137;
+            m3ApiTrap(m3Err_trapExit);
+        }
         scheduler_yield();
+    }
+    if (c == '\x03') {
+        WASM_PROC(_ctx)->exit_code = 130;
+        m3ApiTrap(m3Err_trapExit);
+    }
     m3ApiReturn((int32_t)c);
 }
 
@@ -129,8 +141,18 @@ m3ApiRawFunction(wasm_api_read_line)
     int32_t i = 0;
     while (i < max_len - 1) {
         char c;
-        while (!kbd_buffer_pop(&c))
+        while (!kbd_buffer_pop(&c)) {
+            proc_entry_t *e = proc_get(WASM_PROC(_ctx)->pid);
+            if (e && e->killed) {
+                WASM_PROC(_ctx)->exit_code = 137;
+                m3ApiTrap(m3Err_trapExit);
+            }
             scheduler_yield();
+        }
+        if (c == '\x03') {
+            WASM_PROC(_ctx)->exit_code = 130;
+            m3ApiTrap(m3Err_trapExit);
+        }
         if (c == '\n' || c == '\r') {
             putchar('\n');
             break;
@@ -239,8 +261,18 @@ m3ApiRawFunction(wasm_api_read)
         int32_t i = 0;
         while (i < count) {
             char c;
-            while (!kbd_buffer_pop(&c))
+            while (!kbd_buffer_pop(&c)) {
+                proc_entry_t *e = proc_get(WASM_PROC(_ctx)->pid);
+                if (e && e->killed) {
+                    WASM_PROC(_ctx)->exit_code = 137;
+                    m3ApiTrap(m3Err_trapExit);
+                }
                 scheduler_yield();
+            }
+            if (c == '\x03') {
+                WASM_PROC(_ctx)->exit_code = 130;
+                m3ApiTrap(m3Err_trapExit);
+            }
             buf[i++] = (uint8_t)c;
             if (c == '\n')
                 break;
@@ -498,6 +530,78 @@ m3ApiRawFunction(wasm_api_rmdir)
     m3ApiReturn(result);
 }
 
+/* --- Process APIs --- */
+
+m3ApiRawFunction(wasm_api_spawn)
+{
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char *, path)
+    m3ApiGetArg(int32_t, path_len)
+    m3ApiGetArgMem(const char *, args_buf)
+    m3ApiGetArg(int32_t, args_len)
+    m3ApiGetArg(int32_t, argc)
+    m3ApiCheckMem(path, path_len);
+    if (args_len > 0)
+        m3ApiCheckMem(args_buf, args_len);
+
+    char pathbuf[256];
+    int copy_len = path_len < 255 ? path_len : 255;
+    memcpy(pathbuf, path, copy_len);
+    pathbuf[copy_len] = '\0';
+
+    char *argv[WASM_MAX_ARGC];
+    int actual_argc = 0;
+    const char *p = args_buf;
+    const char *end = args_buf + args_len;
+    while (p < end && actual_argc < argc && actual_argc < WASM_MAX_ARGC) {
+        argv[actual_argc++] = (char *)p;
+        while (p < end && *p != '\0')
+            p++;
+        p++;
+    }
+
+    wasm_process_t *proc = WASM_PROC(_ctx);
+    int32_t pid = wasm_spawn(pathbuf, actual_argc, argv, proc->pid);
+    m3ApiReturn(pid);
+}
+
+m3ApiRawFunction(wasm_api_waitpid)
+{
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, pid)
+
+    while (1) {
+        proc_entry_t *e = proc_get(pid);
+        if (!e)
+            m3ApiReturn(-1);
+        if (e->state == PROC_EXITED) {
+            int32_t code = e->exit_code;
+            proc_free(pid);
+            m3ApiReturn(code);
+        }
+        scheduler_yield();
+    }
+}
+
+m3ApiRawFunction(wasm_api_kill)
+{
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, pid)
+
+    proc_entry_t *e = proc_get(pid);
+    if (!e)
+        m3ApiReturn(-1);
+    e->killed = true;
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasm_api_getpid)
+{
+    m3ApiReturnType(int32_t)
+    wasm_process_t *proc = WASM_PROC(_ctx);
+    m3ApiReturn(proc->pid);
+}
+
 /* --- Link all APIs --- */
 
 void wasm_link_api(IM3Module module, wasm_process_t *proc)
@@ -520,4 +624,8 @@ void wasm_link_api(IM3Module module, wasm_process_t *proc)
     m3_LinkRawFunctionEx(module, "env", "mkdir", "i(*i)", &wasm_api_mkdir, proc);
     m3_LinkRawFunctionEx(module, "env", "unlink", "i(*i)", &wasm_api_unlink, proc);
     m3_LinkRawFunctionEx(module, "env", "rmdir", "i(*i)", &wasm_api_rmdir, proc);
+    m3_LinkRawFunctionEx(module, "env", "spawn", "i(*i*ii)", &wasm_api_spawn, proc);
+    m3_LinkRawFunctionEx(module, "env", "waitpid", "i(i)", &wasm_api_waitpid, proc);
+    m3_LinkRawFunctionEx(module, "env", "kill", "i(i)", &wasm_api_kill, proc);
+    m3_LinkRawFunctionEx(module, "env", "getpid", "i()", &wasm_api_getpid, proc);
 }

@@ -148,8 +148,11 @@ uint64_t keyboard_handler(uint64_t rsp)
 
         if (last_char && !kbd_is_modifier_key(key)) {
             char ch = last_char;
-            if (kbd_modifiers.shift || kbd_modifiers.caps_lock)
+            if (kbd_modifiers.ctrl) {
+                ch = ch & 0x1f;
+            } else if (kbd_modifiers.shift || kbd_modifiers.caps_lock) {
                 ch = kbd_capitalise(ch);
+            }
             kbd_buffer_push(ch);
         }
 

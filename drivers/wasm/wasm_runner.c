@@ -2,6 +2,8 @@
 #include <fs.h>
 #include <heap.h>
 #include <keyboard.h>
+#include <process.h>
+#include <scheduler.h>
 #include <stdio.h>
 #include <string.h>
 #include <wasm_api.h>
@@ -10,7 +12,14 @@
 #include "wasm3.h"
 #include "m3_env.h"
 
-int wasm_run_file(const char *path, int argc, char **argv)
+typedef struct {
+    char path[256];
+    int argc;
+    char argv[WASM_MAX_ARGC][WASM_MAX_ARG_LEN];
+    int32_t pid;
+} spawn_args_t;
+
+static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid)
 {
     vfs_mount_t *mount = vfs_get_mounted_fs();
     if (!mount) {
@@ -36,6 +45,11 @@ int wasm_run_file(const char *path, int argc, char **argv)
     }
 
     wasm_process_t *proc = wasm_process_create(argc, argv);
+    proc->pid = pid;
+
+    proc_entry_t *entry = proc_get(pid);
+    if (entry)
+        entry->wasm_proc = proc;
 
     IM3Environment env = m3_NewEnvironment();
     IM3Runtime runtime = m3_NewRuntime(env, 8192, NULL);
@@ -101,4 +115,73 @@ int wasm_run_file(const char *path, int argc, char **argv)
     free(wasm_bytes);
     wasm_process_destroy(proc);
     return ret;
+}
+
+int wasm_run_file(const char *path, int argc, char **argv)
+{
+    int32_t pid = proc_alloc(0);
+    if (pid < 0) {
+        printf("Process table full\n");
+        return -1;
+    }
+
+    proc_set_foreground(pid);
+    int ret = wasm_run_module(path, argc, argv, pid);
+
+    proc_entry_t *entry = proc_get(pid);
+    if (entry) {
+        entry->state = PROC_EXITED;
+        entry->exit_code = ret;
+    }
+    proc_set_foreground(0);
+    proc_free(pid);
+    return ret;
+}
+
+static void wasm_spawn_entry(void *arg)
+{
+    spawn_args_t *args = (spawn_args_t *)arg;
+    int32_t pid = args->pid;
+
+    char *argv_ptrs[WASM_MAX_ARGC];
+    for (int i = 0; i < args->argc; i++)
+        argv_ptrs[i] = args->argv[i];
+
+    int ret = wasm_run_module(args->path, args->argc, argv_ptrs, pid);
+
+    proc_entry_t *entry = proc_get(pid);
+    if (entry) {
+        entry->state = PROC_EXITED;
+        entry->exit_code = ret;
+        if (proc_foreground_pid() == pid)
+            proc_set_foreground(entry->parent_pid);
+    }
+
+    free(args);
+}
+
+int32_t wasm_spawn(const char *path, int argc, char **argv, int32_t parent_pid)
+{
+    int32_t pid = proc_alloc(parent_pid);
+    if (pid < 0)
+        return -1;
+
+    spawn_args_t *args = malloc(sizeof(spawn_args_t));
+    strncpy(args->path, path, sizeof(args->path) - 1);
+    args->path[sizeof(args->path) - 1] = '\0';
+    args->argc = argc < WASM_MAX_ARGC ? argc : WASM_MAX_ARGC;
+    for (int i = 0; i < args->argc; i++) {
+        strncpy(args->argv[i], argv[i], WASM_MAX_ARG_LEN - 1);
+        args->argv[i][WASM_MAX_ARG_LEN - 1] = '\0';
+    }
+    args->pid = pid;
+
+    thread_t *t = thread_create(wasm_spawn_entry, args);
+    proc_entry_t *entry = proc_get(pid);
+    if (entry) {
+        entry->thread_id = t->id;
+    }
+    proc_set_foreground(pid);
+
+    return pid;
 }
