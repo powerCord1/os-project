@@ -7,6 +7,8 @@
 #include <pit.h>
 #include <process.h>
 #include <scheduler.h>
+#include <framebuffer.h>
+#include <limine_defs.h>
 #include <pipe.h>
 #include <tty.h>
 #include <waitqueue.h>
@@ -854,6 +856,79 @@ m3ApiRawFunction(wasm_api_tty_get_size)
     m3ApiReturn((int32_t)((tty->rows << 16) | (tty->cols & 0xFFFF)));
 }
 
+/* --- Graphics APIs --- */
+
+m3ApiRawFunction(wasm_api_fb_info)
+{
+    m3ApiGetArgMem(uint32_t *, buf)
+    m3ApiCheckMem(buf, 16);
+    buf[0] = (uint32_t)fb->width;
+    buf[1] = (uint32_t)fb->height;
+    buf[2] = (uint32_t)(fb->width * 4);
+    buf[3] = 32;
+    m3ApiSuccess();
+}
+
+m3ApiRawFunction(wasm_api_fb_alloc)
+{
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArg(uint32_t, w)
+    m3ApiGetArg(uint32_t, h)
+
+    uint32_t needed = w * h * 4;
+    uint32_t current_size;
+    m3_GetMemory(runtime, &current_size, 0);
+
+    uint32_t alloc_offset = (current_size + 15) & ~15u;
+    uint32_t total_needed = alloc_offset + needed;
+    uint32_t pages_needed = (total_needed + 65535) / 65536;
+    uint32_t current_pages = current_size / 65536;
+
+    if (pages_needed > current_pages) {
+        M3Result res = ResizeMemory(runtime, pages_needed);
+        if (res)
+            m3ApiTrap("fb_alloc: failed to grow memory");
+    }
+
+    m3ApiReturn(alloc_offset);
+}
+
+m3ApiRawFunction(wasm_api_fb_flush)
+{
+    m3ApiGetArg(uint32_t, src_offset)
+    m3ApiGetArg(uint32_t, dst_x)
+    m3ApiGetArg(uint32_t, dst_y)
+    m3ApiGetArg(uint32_t, w)
+    m3ApiGetArg(uint32_t, h)
+    m3ApiGetArg(uint32_t, src_pitch)
+
+    uint32_t mem_size;
+    uint8_t *mem = m3_GetMemory(runtime, &mem_size, 0);
+    if (!mem || src_offset + h * src_pitch > mem_size)
+        m3ApiTrap("out of bounds framebuffer access");
+
+    uint8_t *src = mem + src_offset;
+    uint32_t fb_pitch = fb->pitch;
+    uint8_t *dst = (uint8_t *)fb_ptr + dst_y * fb_pitch + dst_x * 4;
+
+    uint32_t max_w = (dst_x < fb->width) ? fb->width - dst_x : 0;
+    uint32_t max_h = (dst_y < fb->height) ? fb->height - dst_y : 0;
+    if (w > max_w) w = max_w;
+    if (h > max_h) h = max_h;
+
+    for (uint32_t row = 0; row < h; row++) {
+        memcpy(dst, src, w * 4);
+        src += src_pitch;
+        dst += fb_pitch;
+    }
+    m3ApiSuccess();
+}
+
+m3ApiRawFunction(wasm_api_fb_sync)
+{
+    m3ApiSuccess();
+}
+
 /* --- Link all APIs --- */
 
 void wasm_link_api(IM3Module module, wasm_process_t *proc)
@@ -888,4 +963,8 @@ void wasm_link_api(IM3Module module, wasm_process_t *proc)
     m3_LinkRawFunctionEx(module, "env", "spawn_redirected", "i(*i*ii*i)", &wasm_api_spawn_redirected, proc);
     m3_LinkRawFunctionEx(module, "env", "tty_set_mode", "i(i)", &wasm_api_tty_set_mode, proc);
     m3_LinkRawFunctionEx(module, "env", "tty_get_size", "i()", &wasm_api_tty_get_size, proc);
+    m3_LinkRawFunctionEx(module, "env", "fb_info", "v(*)", &wasm_api_fb_info, proc);
+    m3_LinkRawFunctionEx(module, "env", "fb_alloc", "i(ii)", &wasm_api_fb_alloc, proc);
+    m3_LinkRawFunctionEx(module, "env", "fb_flush", "v(iiiiii)", &wasm_api_fb_flush, proc);
+    m3_LinkRawFunctionEx(module, "env", "fb_sync", "v()", &wasm_api_fb_sync, proc);
 }

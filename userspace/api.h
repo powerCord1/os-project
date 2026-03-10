@@ -46,6 +46,12 @@ extern int getpid(void) WASM_IMPORT(getpid);
 extern int tty_set_mode(int mode) WASM_IMPORT(tty_set_mode);
 extern int tty_get_size(void) WASM_IMPORT(tty_get_size);
 
+/* Graphics */
+extern void fb_info(void *buf) WASM_IMPORT(fb_info);
+extern unsigned int fb_alloc(int w, int h) WASM_IMPORT(fb_alloc);
+extern void fb_flush(unsigned int src, int dst_x, int dst_y, int w, int h, int src_pitch) WASM_IMPORT(fb_flush);
+extern void fb_sync(void) WASM_IMPORT(fb_sync);
+
 /* Pipes & Redirection */
 extern int dup2(int oldfd, int newfd) WASM_IMPORT(dup2);
 extern int pipe(int *fds) WASM_IMPORT(pipe);

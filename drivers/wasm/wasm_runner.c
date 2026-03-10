@@ -134,7 +134,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         entry->wasm_proc = proc;
 
     IM3Environment env = m3_NewEnvironment();
-    IM3Runtime runtime = m3_NewRuntime(env, 8192, NULL);
+    IM3Runtime runtime = m3_NewRuntime(env, 32768, NULL);
     IM3Module module = NULL;
 
     M3Result result = m3_ParseModule(env, &module, wasm_bytes, size);

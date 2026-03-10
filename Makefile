@@ -53,7 +53,7 @@ CFLAGS = -std=gnu99 \
 		 -Iwasm3/source \
 		 -Dd_m3LogTimestamps=0 \
 		 -Dd_m3MaxFunctionStackHeight=500 \
-		 -Dd_m3MaxLinearMemoryPages=256 \
+		 -Dd_m3MaxLinearMemoryPages=1024 \
 		 -fno-stack-protector \
 		 -fno-stack-check \
 		 -fno-PIC \
