@@ -196,3 +196,8 @@ void kbd_dump_modifiers();
 void wait_for_kbd();
 uint8_t kbd_poll_key();
 void kbd_test_leds();
+
+void kbd_buffer_init(void);
+bool kbd_buffer_push(char c);
+bool kbd_buffer_pop(char *c);
+bool kbd_buffer_empty(void);

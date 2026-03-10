@@ -23,6 +23,7 @@ key_t last_key = {0, 0};
 
 void kbd_init()
 {
+    kbd_buffer_init();
     keyboard_logging_enabled = KBD_LOG_DEFAULT;
     log_verbose("Keyboard logging is %s",
                 keyboard_logging_enabled ? "enabled" : "disabled");
@@ -144,6 +145,13 @@ uint64_t keyboard_handler(uint64_t rsp)
         last_char = scancode_map[key];
         last_scancode = key;
         log_kbd_action("key pressed: 0x%x", key);
+
+        if (last_char && !kbd_is_modifier_key(key)) {
+            char ch = last_char;
+            if (kbd_modifiers.shift || kbd_modifiers.caps_lock)
+                ch = kbd_capitalise(ch);
+            kbd_buffer_push(ch);
+        }
 
         switch (key) {
         case KEY_F1:

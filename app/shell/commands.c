@@ -502,8 +502,10 @@ void cmd_rmdir(int argc, char **argv)
 void cmd_wasm(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: wasm <file>\n");
+        printf("Usage: wasm <file> [args...]\n");
         return;
     }
-    wasm_run_file(argv[1]);
+    int ret = wasm_run_file(argv[1], argc - 1, argv + 1);
+    if (ret != 0)
+        printf("Exit code: %d\n", ret);
 }

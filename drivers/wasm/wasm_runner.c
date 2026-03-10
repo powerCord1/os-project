@@ -1,6 +1,7 @@
 #include <debug.h>
 #include <fs.h>
 #include <heap.h>
+#include <keyboard.h>
 #include <stdio.h>
 #include <string.h>
 #include <wasm_api.h>
@@ -9,7 +10,7 @@
 #include "wasm3.h"
 #include "m3_env.h"
 
-int wasm_run_file(const char *path)
+int wasm_run_file(const char *path, int argc, char **argv)
 {
     vfs_mount_t *mount = vfs_get_mounted_fs();
     if (!mount) {
@@ -34,6 +35,8 @@ int wasm_run_file(const char *path)
         return -1;
     }
 
+    wasm_process_t *proc = wasm_process_create(argc, argv);
+
     IM3Environment env = m3_NewEnvironment();
     IM3Runtime runtime = m3_NewRuntime(env, 8192, NULL);
     IM3Module module = NULL;
@@ -44,6 +47,7 @@ int wasm_run_file(const char *path)
         m3_FreeRuntime(runtime);
         m3_FreeEnvironment(env);
         free(wasm_bytes);
+        wasm_process_destroy(proc);
         return -1;
     }
 
@@ -54,10 +58,11 @@ int wasm_run_file(const char *path)
         m3_FreeRuntime(runtime);
         m3_FreeEnvironment(env);
         free(wasm_bytes);
+        wasm_process_destroy(proc);
         return -1;
     }
 
-    wasm_link_api(module);
+    wasm_link_api(module, proc);
 
     IM3Function func;
     result = m3_FindFunction(&func, runtime, "_start");
@@ -69,21 +74,31 @@ int wasm_run_file(const char *path)
         m3_FreeRuntime(runtime);
         m3_FreeEnvironment(env);
         free(wasm_bytes);
+        wasm_process_destroy(proc);
         return -1;
     }
 
+    kbd_buffer_init();
     result = m3_Call(func, 0, NULL);
+
+    int ret = 0;
     if (result) {
-        M3ErrorInfo info;
-        m3_GetErrorInfo(runtime, &info);
-        printf("Trap: %s", result);
-        if (info.message)
-            printf(" (%s)", info.message);
-        printf("\n");
+        if (result == m3Err_trapExit) {
+            ret = proc->exit_code;
+        } else {
+            M3ErrorInfo info;
+            m3_GetErrorInfo(runtime, &info);
+            printf("Trap: %s", result);
+            if (info.message)
+                printf(" (%s)", info.message);
+            printf("\n");
+            ret = -1;
+        }
     }
 
     m3_FreeRuntime(runtime);
     m3_FreeEnvironment(env);
     free(wasm_bytes);
-    return result ? -1 : 0;
+    wasm_process_destroy(proc);
+    return ret;
 }

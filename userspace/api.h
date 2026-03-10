@@ -1,13 +1,41 @@
 #pragma once
 
-#define WASM_IMPORT __attribute__((import_module("env"), import_name(#name)))
+#define WASM_IMPORT(name) __attribute__((import_module("env"), import_name(#name)))
 
-extern void print(const char *ptr, int len)
-    __attribute__((import_module("env"), import_name("print")));
-extern void putchar(int c)
-    __attribute__((import_module("env"), import_name("putchar")));
-extern unsigned long long get_ticks(void)
-    __attribute__((import_module("env"), import_name("get_ticks")));
+#define O_RDONLY 0x0001
+#define O_WRONLY 0x0002
+#define O_RDWR   0x0003
+#define O_CREAT  0x0100
+#define O_TRUNC  0x0200
+#define O_APPEND 0x0400
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+/* IO */
+extern void print(const char *ptr, int len) WASM_IMPORT(print);
+extern void putchar(int c) WASM_IMPORT(putchar);
+extern unsigned long long get_ticks(void) WASM_IMPORT(get_ticks);
+extern void exit(int code) WASM_IMPORT(exit);
+extern int getchar(void) WASM_IMPORT(getchar);
+extern int read_line(char *buf, int max_len) WASM_IMPORT(read_line);
+extern int get_argc(void) WASM_IMPORT(get_argc);
+extern int get_argv(int index, char *buf, int buf_len) WASM_IMPORT(get_argv);
+
+/* Filesystem */
+extern int open(const char *path, int path_len, int flags) WASM_IMPORT(open);
+extern int close(int fd) WASM_IMPORT(close);
+extern int read(int fd, char *buf, int count) WASM_IMPORT(read);
+extern int write(int fd, const char *buf, int count) WASM_IMPORT(write);
+extern int seek(int fd, int offset, int whence) WASM_IMPORT(seek);
+extern int stat(const char *path, int path_len, void *stat_buf) WASM_IMPORT(stat);
+extern int readdir(const char *path, int path_len, char *buf, int buf_len) WASM_IMPORT(readdir);
+extern int mkdir(const char *path, int path_len) WASM_IMPORT(mkdir);
+extern int unlink(const char *path, int path_len) WASM_IMPORT(unlink);
+extern int rmdir(const char *path, int path_len) WASM_IMPORT(rmdir);
+
+/* Helpers */
 
 static int strlen(const char *s)
 {
@@ -48,4 +76,34 @@ static void print_num(int n)
         rev[j] = buf[i - 1 - j];
 
     print(rev, i);
+}
+
+static int open_path(const char *path, int flags)
+{
+    return open(path, strlen(path), flags);
+}
+
+static int stat_path(const char *path, void *stat_buf)
+{
+    return stat(path, strlen(path), stat_buf);
+}
+
+static int readdir_path(const char *path, char *buf, int buf_len)
+{
+    return readdir(path, strlen(path), buf, buf_len);
+}
+
+static int mkdir_path(const char *path)
+{
+    return mkdir(path, strlen(path));
+}
+
+static int unlink_path(const char *path)
+{
+    return unlink(path, strlen(path));
+}
+
+static int rmdir_path(const char *path)
+{
+    return rmdir(path, strlen(path));
 }
