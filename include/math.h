@@ -1,28 +1,35 @@
+#pragma once
+
 #include <stdbool.h>
 #include <stddef.h>
 
 #define M_PI 3.14159265358979323846
+#define NAN __builtin_nanf("")
+#define INFINITY __builtin_inff()
 
-// Return the absolute value of `n`
+#define isnan(x) __builtin_isnan(x)
+#define isinf(x) __builtin_isinf(x)
+#define signbit(x) __builtin_signbit(x)
+
 int abs(int n);
-
-// Return the absolute value of a floating-point number
 double fabs(double x);
-
-// Calculate the floating-point remainder of `x / y`
+float fabsf(float x);
 double fmod(double x, double y);
-
-// `sin` implementation using Taylor series expansion
 double sin(double x);
-
-// `cos` implementation using Taylor series expansion
 double cos(double x);
-
-// Seeded random number generator
 void srand(unsigned int seed);
-
-// Random number generator
 size_t rand(void);
-
-// Return a random number in between `min` and `max`
 size_t random_range(size_t min, size_t max);
+
+double ceil(double x);
+float ceilf(float x);
+double floor(double x);
+float floorf(float x);
+double trunc(double x);
+float truncf(float x);
+double sqrt(double x);
+float sqrtf(float x);
+double rint(double x);
+float rintf(float x);
+double copysign(double x, double y);
+float copysignf(float x, float y);

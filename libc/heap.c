@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include <heap.h>
+#include <panic.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -91,6 +92,21 @@ void *realloc(void *ptr, size_t size)
     memcpy(new_ptr, ptr, block->size);
     free(ptr);
     return new_ptr;
+}
+
+void *calloc(size_t nmemb, size_t size)
+{
+    size_t total = nmemb * size;
+    void *ptr = malloc(total);
+    if (ptr) {
+        memset(ptr, 0, total);
+    }
+    return ptr;
+}
+
+void abort(void)
+{
+    panic("abort");
 }
 
 size_t heap_get_used_memory()

@@ -22,6 +22,16 @@ char *strpbrk(const char *str, const char *accept);
 int tolower(int c);
 int toupper(int c);
 
+char *strncpy(char *dest, const char *src, size_t n);
+char *strncat(char *dest, const char *src, size_t n);
+size_t strnlen(const char *s, size_t maxlen);
+char *strcat(char *dest, const char *src);
+int strncmp(const char *s1, const char *s2, size_t n);
+
+unsigned long strtoul(const char *nptr, char **endptr, int base);
+unsigned long long strtoull(const char *nptr, char **endptr, int base);
+double strtod(const char *nptr, char **endptr);
+
 char *itohexa(char *dest, unsigned x);
 char *itoa(char *dest, int n);
 char *uitoa(char *dest, unsigned int n);

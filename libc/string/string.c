@@ -345,3 +345,165 @@ char *strndup(const char *s, size_t n)
     new_s[len] = '\0';
     return new_s;
 }
+
+char *strncpy(char *dest, const char *src, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+    for (; i < n; i++) {
+        dest[i] = '\0';
+    }
+    return dest;
+}
+
+char *strncat(char *dest, const char *src, size_t n)
+{
+    char *ptr = dest + strlen(dest);
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        ptr[i] = src[i];
+    }
+    ptr[i] = '\0';
+    return dest;
+}
+
+size_t strnlen(const char *s, size_t maxlen)
+{
+    size_t len = 0;
+    while (len < maxlen && s[len]) {
+        len++;
+    }
+    return len;
+}
+
+char *strcat(char *dest, const char *src)
+{
+    char *ptr = dest + strlen(dest);
+    while (*src) {
+        *ptr++ = *src++;
+    }
+    *ptr = '\0';
+    return dest;
+}
+
+int strncmp(const char *s1, const char *s2, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (s1[i] != s2[i] || s1[i] == '\0') {
+            return (unsigned char)s1[i] - (unsigned char)s2[i];
+        }
+    }
+    return 0;
+}
+
+static int digit_value(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'z')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'Z')
+        return c - 'A' + 10;
+    return -1;
+}
+
+unsigned long strtoul(const char *nptr, char **endptr, int base)
+{
+    const char *s = nptr;
+    while (*s == ' ' || *s == '\t' || *s == '\n')
+        s++;
+
+    if (base == 0) {
+        if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+            base = 16;
+            s += 2;
+        } else if (*s == '0') {
+            base = 8;
+            s++;
+        } else {
+            base = 10;
+        }
+    } else if (base == 16 && *s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+    }
+
+    unsigned long result = 0;
+    int d;
+    while ((d = digit_value(*s)) >= 0 && d < base) {
+        result = result * base + d;
+        s++;
+    }
+
+    if (endptr)
+        *endptr = (char *)s;
+    return result;
+}
+
+unsigned long long strtoull(const char *nptr, char **endptr, int base)
+{
+    const char *s = nptr;
+    while (*s == ' ' || *s == '\t' || *s == '\n')
+        s++;
+
+    if (base == 0) {
+        if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+            base = 16;
+            s += 2;
+        } else if (*s == '0') {
+            base = 8;
+            s++;
+        } else {
+            base = 10;
+        }
+    } else if (base == 16 && *s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+    }
+
+    unsigned long long result = 0;
+    int d;
+    while ((d = digit_value(*s)) >= 0 && d < base) {
+        result = result * base + d;
+        s++;
+    }
+
+    if (endptr)
+        *endptr = (char *)s;
+    return result;
+}
+
+double strtod(const char *nptr, char **endptr)
+{
+    const char *s = nptr;
+    while (*s == ' ' || *s == '\t' || *s == '\n')
+        s++;
+
+    double sign = 1.0;
+    if (*s == '-') {
+        sign = -1.0;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+
+    double result = 0.0;
+    while (*s >= '0' && *s <= '9') {
+        result = result * 10.0 + (*s - '0');
+        s++;
+    }
+
+    if (*s == '.') {
+        s++;
+        double factor = 0.1;
+        while (*s >= '0' && *s <= '9') {
+            result += (*s - '0') * factor;
+            factor *= 0.1;
+            s++;
+        }
+    }
+
+    if (endptr)
+        *endptr = (char *)s;
+    return sign * result;
+}
