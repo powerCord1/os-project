@@ -12,6 +12,7 @@
 #include <power.h>
 #include <stdio.h>
 #include <timer.h>
+#include <tty.h>
 
 static volatile char last_char = 0;
 static volatile char last_scancode = 0;
@@ -146,19 +147,25 @@ uint64_t keyboard_handler(uint64_t rsp)
         last_scancode = key;
         log_kbd_action("key pressed: 0x%x", key);
 
-        if (last_char && !kbd_is_modifier_key(key)) {
+        if (!kbd_is_modifier_key(key)) {
             char ch = last_char;
-            if (kbd_modifiers.ctrl) {
-                ch = ch & 0x1f;
-            } else if (kbd_modifiers.shift) {
-                char shifted = scancode_shift_map[key];
-                if (shifted)
-                    ch = shifted;
-            } else if (kbd_modifiers.caps_lock) {
-                if (ch >= 'a' && ch <= 'z')
-                    ch -= 32;
+            if (kbd_modifiers.caps_lock && ch >= 'a' && ch <= 'z')
+                ch -= 32;
+            tty_t *tty = tty_get(0);
+            if (tty->keyboard_attached) {
+                tty_input_scancode(tty, key, ch,
+                                   kbd_modifiers.ctrl, kbd_modifiers.shift);
+            } else if (ch) {
+                char buf_ch = ch;
+                if (kbd_modifiers.ctrl)
+                    buf_ch = ch & 0x1f;
+                else if (kbd_modifiers.shift) {
+                    char shifted = scancode_shift_map[key];
+                    if (shifted)
+                        buf_ch = shifted;
+                }
+                kbd_buffer_push(buf_ch);
             }
-            kbd_buffer_push(ch);
         }
 
         switch (key) {

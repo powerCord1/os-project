@@ -9,6 +9,7 @@
 #include <vmm.h>
 
 #define ATA_CMD_READ_DMA_EX 0x25
+#define ATA_CMD_WRITE_DMA_EX 0x35
 #define ATA_CMD_IDENTIFY 0xEC
 
 static int check_type(hba_port_t *port)
@@ -167,6 +168,101 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
         }
         if (port->is & (1 << 30)) {
             log_err("SATA: Read disk error");
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+int sata_write(hba_port_t *port, uint64_t start, uint32_t count,
+               const uint16_t *buf)
+{
+    port->is = (uint32_t)-1;
+    int slot = ahci_find_cmdslot(port);
+    if (slot == -1) {
+        return 0;
+    }
+
+    uint64_t clb_phys = port->clb;
+    clb_phys |= ((uint64_t)port->clbu << 32);
+
+    hba_cmd_header_t *cmdheader =
+        (hba_cmd_header_t *)phys_to_virt((void *)(uintptr_t)clb_phys);
+    cmdheader += slot;
+    cmdheader->cfl = sizeof(fis_reg_h2d_t) / sizeof(uint32_t);
+    cmdheader->w = 1;
+    cmdheader->prdtl = 0;
+
+    uint64_t ctba_phys = cmdheader->ctba;
+    ctba_phys |= ((uint64_t)cmdheader->ctbau << 32);
+
+    hba_cmd_tbl_t *cmdtbl =
+        (hba_cmd_tbl_t *)phys_to_virt((void *)(uintptr_t)ctba_phys);
+
+    uint32_t byte_count = count << 9;
+    int prdtl = 0;
+    uintptr_t temp_buf_virt = (uintptr_t)buf;
+
+    while (byte_count > 0) {
+        uint32_t size = (byte_count > 0x400000) ? 0x400000 : byte_count;
+
+        void *phys_buf = vmm_get_phys((void *)temp_buf_virt);
+        if (!phys_buf) {
+            log_err("SATA: Failed to get physical address for buffer 0x%lx",
+                    temp_buf_virt);
+            return 0;
+        }
+
+        cmdtbl->prdt_entry[prdtl].dba = (uint32_t)(uintptr_t)phys_buf;
+        cmdtbl->prdt_entry[prdtl].dbau = (uint32_t)((uintptr_t)phys_buf >> 32);
+        cmdtbl->prdt_entry[prdtl].dbc = size - 1;
+        cmdtbl->prdt_entry[prdtl].i = 0;
+
+        temp_buf_virt += size;
+        byte_count -= size;
+        prdtl++;
+    }
+
+    cmdtbl->prdt_entry[prdtl - 1].i = 1;
+    cmdheader->prdtl = prdtl;
+
+    memset(cmdtbl->cfis, 0, sizeof(cmdtbl->cfis));
+
+    fis_reg_h2d_t *cmdfis = (fis_reg_h2d_t *)(&cmdtbl->cfis);
+    cmdfis->fis_type = FIS_TYPE_REG_H2D;
+    cmdfis->c = 1;
+    cmdfis->command = ATA_CMD_WRITE_DMA_EX;
+
+    cmdfis->lba0 = (uint8_t)start;
+    cmdfis->lba1 = (uint8_t)(start >> 8);
+    cmdfis->lba2 = (uint8_t)(start >> 16);
+    cmdfis->device = 1 << 6;
+
+    cmdfis->lba3 = (uint8_t)(start >> 24);
+    cmdfis->lba4 = (uint8_t)(start >> 32);
+    cmdfis->lba5 = (uint8_t)(start >> 40);
+
+    cmdfis->countl = count & 0xFF;
+    cmdfis->counth = (count >> 8) & 0xFF;
+
+    uint64_t spin = 0;
+    while ((port->tfd & (0x80 | 0x08)) && spin < 1000000) {
+        spin++;
+    }
+    if (spin == 1000000) {
+        log_err("SATA: port is hung");
+        return 0;
+    }
+
+    port->ci = 1 << slot;
+
+    while (1) {
+        if ((port->ci & (1 << slot)) == 0) {
+            break;
+        }
+        if (port->is & (1 << 30)) {
+            log_err("SATA: Write disk error");
             return 0;
         }
     }

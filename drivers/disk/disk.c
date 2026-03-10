@@ -55,10 +55,36 @@ bool sata_disk_read(disk_t *d, uint64_t lba, uint32_t count, void *buf)
     return true;
 }
 
+bool sata_disk_write(disk_t *d, uint64_t lba, uint32_t count, const void *buf)
+{
+    void *phys = pmm_alloc_page();
+    if (!phys)
+        return false;
+
+    void *dma_buf = phys_to_virt(phys);
+    const uint8_t *src = (const uint8_t *)buf;
+    uint32_t remaining = count;
+
+    while (remaining > 0) {
+        uint32_t chunk = remaining > 8 ? 8 : remaining;
+        memcpy(dma_buf, src, chunk * 512);
+        if (!sata_write((hba_port_t *)d->driver_data, lba, chunk, dma_buf)) {
+            pmm_free_page(phys);
+            return false;
+        }
+        src += chunk * 512;
+        lba += chunk;
+        remaining -= chunk;
+    }
+
+    pmm_free_page(phys);
+    return true;
+}
+
 static disk_driver_t sata_driver = {
     .name = "sata",
     .read_sectors = sata_disk_read,
-    .write_sectors = NULL, // Not implemented yet
+    .write_sectors = sata_disk_write,
 };
 
 static disk_driver_t nvme_driver = {

@@ -42,6 +42,10 @@ extern int waitpid(int pid) WASM_IMPORT(waitpid);
 extern int kill(int pid) WASM_IMPORT(kill);
 extern int getpid(void) WASM_IMPORT(getpid);
 
+/* TTY */
+extern int tty_set_mode(int mode) WASM_IMPORT(tty_set_mode);
+extern int tty_get_size(void) WASM_IMPORT(tty_get_size);
+
 /* Pipes & Redirection */
 extern int dup2(int oldfd, int newfd) WASM_IMPORT(dup2);
 extern int pipe(int *fds) WASM_IMPORT(pipe);
@@ -60,6 +64,37 @@ extern int spawn_redirected(const char *path, int path_len, const char *args,
 #define FD_SETUP_FILE_APPEND 5
 
 /* Helpers */
+
+static void *memcpy(void *dst, const void *src, int n)
+{
+    char *d = (char *)dst;
+    const char *s = (const char *)src;
+    for (int i = 0; i < n; i++)
+        d[i] = s[i];
+    return dst;
+}
+
+static void *memset(void *dst, int c, int n)
+{
+    char *d = (char *)dst;
+    for (int i = 0; i < n; i++)
+        d[i] = (char)c;
+    return dst;
+}
+
+static void *memmove(void *dst, const void *src, int n)
+{
+    char *d = (char *)dst;
+    const char *s = (const char *)src;
+    if (d < s) {
+        for (int i = 0; i < n; i++)
+            d[i] = s[i];
+    } else {
+        for (int i = n - 1; i >= 0; i--)
+            d[i] = s[i];
+    }
+    return dst;
+}
 
 static int strlen(const char *s)
 {

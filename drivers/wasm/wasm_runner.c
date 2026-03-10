@@ -7,6 +7,7 @@
 #include <scheduler.h>
 #include <stdio.h>
 #include <string.h>
+#include <tty.h>
 #include <wasm_api.h>
 #include <wasm_runner.h>
 
@@ -176,9 +177,18 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         return -1;
     }
 
-    if (proc->fds[0].type == FD_CONSOLE)
-        kbd_buffer_init();
+    if (proc->fds[0].type == FD_CONSOLE) {
+        tty_t *t = tty_get(proc->tty_id);
+        tty_input_flush(t);
+        tty_sync_from_fb(t);
+        tty_attach_keyboard(t);
+    }
     result = m3_Call(func, 0, NULL);
+
+    if (proc->fds[0].type == FD_CONSOLE) {
+        tty_detach_keyboard(tty_get(proc->tty_id));
+        kbd_buffer_init();
+    }
 
     int ret = 0;
     if (result) {

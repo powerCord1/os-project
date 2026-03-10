@@ -24,6 +24,8 @@ typedef struct {
     bool visible;
 } cursor_t;
 
+extern cursor_t cursor;
+
 // Initialise the framebuffer
 void fb_init();
 struct limine_framebuffer *get_fb_data();

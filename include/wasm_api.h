@@ -49,6 +49,7 @@ typedef struct wasm_process {
     char argv[WASM_MAX_ARGC][WASM_MAX_ARG_LEN];
     int32_t exit_code;
     int32_t pid;
+    int tty_id;
     wasm_fd_t fds[WASM_MAX_FDS];
 } wasm_process_t;
 

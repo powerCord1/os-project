@@ -126,13 +126,140 @@ static int spawn_stage(stage_t *s, int pipe_in, int pipe_out)
         return spawn_cmd(path, s->argv, s->argc);
 }
 
+static int read_line_raw(char *line, int max_len)
+{
+    tty_set_mode(1);
+    int len = 0;
+    int pos = 0;
+    char c;
+
+    while (1) {
+        int r = read(0, &c, 1);
+        if (r <= 0) {
+            tty_set_mode(0);
+            return -1;
+        }
+
+        if (c == '\x1b') {
+            char seq[3];
+            if (read(0, &seq[0], 1) <= 0) break;
+            if (seq[0] == '[') {
+                if (read(0, &seq[1], 1) <= 0) break;
+                if (seq[1] == 'C') {
+                    // right arrow
+                    if (pos < len) {
+                        pos++;
+                        puts("\x1b[C");
+                    }
+                    continue;
+                } else if (seq[1] == 'D') {
+                    // left arrow
+                    if (pos > 0) {
+                        pos--;
+                        puts("\x1b[D");
+                    }
+                    continue;
+                } else if (seq[1] == 'H') {
+                    // home
+                    while (pos > 0) {
+                        puts("\x1b[D");
+                        pos--;
+                    }
+                    continue;
+                } else if (seq[1] == 'F') {
+                    // end
+                    while (pos < len) {
+                        puts("\x1b[C");
+                        pos++;
+                    }
+                    continue;
+                } else if (seq[1] == '3') {
+                    char tilde;
+                    if (read(0, &tilde, 1) <= 0) break;
+                    if (tilde == '~' && pos < len) {
+                        // delete key
+                        memmove(line + pos, line + pos + 1, len - pos - 1);
+                        len--;
+                        // redraw from cursor to end, clear last char
+                        print(line + pos, len - pos);
+                        putchar(' ');
+                        // move cursor back
+                        for (int i = 0; i <= len - pos; i++)
+                            puts("\x1b[D");
+                    }
+                    continue;
+                }
+            }
+            continue;
+        }
+
+        if (c == '\n' || c == '\r') {
+            putchar('\n');
+            tty_set_mode(0);
+            line[len] = '\0';
+            return len;
+        }
+
+        if (c == '\x03') {
+            // Ctrl+C: cancel line
+            putchar('\n');
+            tty_set_mode(0);
+            line[0] = '\0';
+            return 0;
+        }
+
+        if (c == '\x04') {
+            // Ctrl+D: EOF
+            if (len == 0) {
+                tty_set_mode(0);
+                return -1;
+            }
+            continue;
+        }
+
+        if (c == '\b' || c == 127) {
+            if (pos > 0) {
+                memmove(line + pos - 1, line + pos, len - pos);
+                pos--;
+                len--;
+                puts("\x1b[D");
+                print(line + pos, len - pos);
+                putchar(' ');
+                for (int i = 0; i <= len - pos; i++)
+                    puts("\x1b[D");
+            }
+            continue;
+        }
+
+        if (c < 32)
+            continue;
+
+        if (len >= max_len - 1)
+            continue;
+
+        if (pos < len)
+            memmove(line + pos + 1, line + pos, len - pos);
+        line[pos] = c;
+        len++;
+        print(line + pos, len - pos);
+        pos++;
+        // move cursor back to pos
+        for (int i = 0; i < len - pos; i++)
+            puts("\x1b[D");
+    }
+
+    tty_set_mode(0);
+    line[len] = '\0';
+    return len;
+}
+
 void _start(void)
 {
     char line[256];
 
     while (1) {
         puts("$ ");
-        int len = read_line(line, sizeof(line));
+        int len = read_line_raw(line, sizeof(line));
         if (len < 0)
             break;
         if (len == 0)
@@ -195,8 +322,7 @@ void _start(void)
             continue;
         }
 
-        // Create pipes between stages
-        int pipes[7]; // pipe_ids
+        int pipes[7];
         for (int i = 0; i < num_stages - 1; i++) {
             pipes[i] = pipe_create();
             if (pipes[i] < 0) {
@@ -223,13 +349,11 @@ void _start(void)
             }
         }
 
-        // Close all pipe refs held by the shell
         for (int i = 0; i < num_stages - 1; i++) {
             pipe_close_read(pipes[i]);
             pipe_close_write(pipes[i]);
         }
 
-        // Wait for all children
         int last_code = 0;
         for (int i = 0; i < pid_count; i++)
             last_code = waitpid(pids[i]);

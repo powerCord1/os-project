@@ -8,6 +8,7 @@
 #include <process.h>
 #include <scheduler.h>
 #include <pipe.h>
+#include <tty.h>
 #include <waitqueue.h>
 #include <wasm_api.h>
 #include <wasm_runner.h>
@@ -78,9 +79,11 @@ static void wasm_fd_putchar(wasm_process_t *proc, char c)
     case FD_PIPE_WRITE:
         pipe_write(f->pipe.pipe_id, (const uint8_t *)&c, 1);
         break;
-    default:
-        putchar(c);
+    default: {
+        tty_t *tty = tty_get(proc->tty_id);
+        tty_putchar(tty, c);
         break;
+    }
     }
 }
 
@@ -145,17 +148,19 @@ m3ApiRawFunction(wasm_api_get_argv)
 m3ApiRawFunction(wasm_api_getchar)
 {
     m3ApiReturnType(int32_t)
+    wasm_process_t *proc = WASM_PROC(_ctx);
+    tty_t *tty = tty_get(proc->tty_id);
     char c;
-    while (!kbd_buffer_pop(&c)) {
-        proc_entry_t *e = proc_get(WASM_PROC(_ctx)->pid);
+    while (!tty_input_pop(tty, &c)) {
+        proc_entry_t *e = proc_get(proc->pid);
         if (e && e->killed) {
-            WASM_PROC(_ctx)->exit_code = 137;
+            proc->exit_code = 137;
             m3ApiTrap(m3Err_trapExit);
         }
-        scheduler_yield();
+        waitqueue_sleep(&tty->input_wq);
     }
     if (c == '\x03') {
-        WASM_PROC(_ctx)->exit_code = 130;
+        proc->exit_code = 130;
         m3ApiTrap(m3Err_trapExit);
     }
     if (c == '\x04')
@@ -169,19 +174,21 @@ m3ApiRawFunction(wasm_api_read_line)
     m3ApiGetArgMem(char *, buf)
     m3ApiGetArg(int32_t, max_len)
     m3ApiCheckMem(buf, max_len);
+    wasm_process_t *proc = WASM_PROC(_ctx);
+    tty_t *tty = tty_get(proc->tty_id);
     int32_t i = 0;
     while (i < max_len - 1) {
         char c;
-        while (!kbd_buffer_pop(&c)) {
-            proc_entry_t *e = proc_get(WASM_PROC(_ctx)->pid);
+        while (!tty_input_pop(tty, &c)) {
+            proc_entry_t *e = proc_get(proc->pid);
             if (e && e->killed) {
-                WASM_PROC(_ctx)->exit_code = 137;
+                proc->exit_code = 137;
                 m3ApiTrap(m3Err_trapExit);
             }
-            scheduler_yield();
+            waitqueue_sleep(&tty->input_wq);
         }
         if (c == '\x03') {
-            WASM_PROC(_ctx)->exit_code = 130;
+            proc->exit_code = 130;
             m3ApiTrap(m3Err_trapExit);
         }
         if (c == '\x04') {
@@ -189,18 +196,8 @@ m3ApiRawFunction(wasm_api_read_line)
                 break;
             m3ApiReturn(-1);
         }
-        if (c == '\n' || c == '\r') {
-            putchar('\n');
+        if (c == '\n')
             break;
-        }
-        if (c == '\b') {
-            if (i > 0) {
-                i--;
-                putchar('\b');
-            }
-            continue;
-        }
-        putchar(c);
         buf[i++] = c;
     }
     buf[i] = '\0';
@@ -313,16 +310,17 @@ m3ApiRawFunction(wasm_api_read)
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
     case FD_CONSOLE: {
+        tty_t *tty = tty_get(proc->tty_id);
         int32_t i = 0;
         while (i < count) {
             char c;
-            while (!kbd_buffer_pop(&c)) {
+            while (!tty_input_pop(tty, &c)) {
                 proc_entry_t *e = proc_get(proc->pid);
                 if (e && e->killed) {
                     proc->exit_code = 137;
                     m3ApiTrap(m3Err_trapExit);
                 }
-                scheduler_yield();
+                waitqueue_sleep(&tty->input_wq);
             }
             if (c == '\x03') {
                 proc->exit_code = 130;
@@ -369,10 +367,11 @@ m3ApiRawFunction(wasm_api_write)
 
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
-    case FD_CONSOLE:
-        for (int32_t i = 0; i < count; i++)
-            putchar(buf[i]);
+    case FD_CONSOLE: {
+        tty_t *tty = tty_get(proc->tty_id);
+        tty_write(tty, (const char *)buf, count);
         m3ApiReturn(count);
+    }
     case FD_FILE: {
         if (!f->file.writable)
             m3ApiReturn(-1);
@@ -835,6 +834,26 @@ m3ApiRawFunction(wasm_api_spawn_redirected)
     m3ApiReturn(pid);
 }
 
+/* --- TTY APIs --- */
+
+m3ApiRawFunction(wasm_api_tty_set_mode)
+{
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, mode)
+    wasm_process_t *proc = WASM_PROC(_ctx);
+    tty_t *tty = tty_get(proc->tty_id);
+    int prev = tty_set_mode(tty, mode ? TTY_MODE_RAW : TTY_MODE_COOKED);
+    m3ApiReturn(prev);
+}
+
+m3ApiRawFunction(wasm_api_tty_get_size)
+{
+    m3ApiReturnType(int32_t)
+    wasm_process_t *proc = WASM_PROC(_ctx);
+    tty_t *tty = tty_get(proc->tty_id);
+    m3ApiReturn((int32_t)((tty->rows << 16) | (tty->cols & 0xFFFF)));
+}
+
 /* --- Link all APIs --- */
 
 void wasm_link_api(IM3Module module, wasm_process_t *proc)
@@ -867,4 +886,6 @@ void wasm_link_api(IM3Module module, wasm_process_t *proc)
     m3_LinkRawFunctionEx(module, "env", "pipe_close_read", "i(i)", &wasm_api_pipe_close_read, proc);
     m3_LinkRawFunctionEx(module, "env", "pipe_close_write", "i(i)", &wasm_api_pipe_close_write, proc);
     m3_LinkRawFunctionEx(module, "env", "spawn_redirected", "i(*i*ii*i)", &wasm_api_spawn_redirected, proc);
+    m3_LinkRawFunctionEx(module, "env", "tty_set_mode", "i(i)", &wasm_api_tty_set_mode, proc);
+    m3_LinkRawFunctionEx(module, "env", "tty_get_size", "i()", &wasm_api_tty_get_size, proc);
 }
