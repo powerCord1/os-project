@@ -36,6 +36,7 @@ void cmd_write(int argc, char **argv);
 void cmd_rm(int argc, char **argv);
 void cmd_mkdir(int argc, char **argv);
 void cmd_rmdir(int argc, char **argv);
+void cmd_wasm(int argc, char **argv);
 
 extern const cmd_list_t cmds[];
 extern uint8_t cmd_count;
