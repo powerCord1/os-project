@@ -271,6 +271,23 @@ static void int_to_str(int n, char *buf)
     buf[i] = '\0';
 }
 
+static int contains(const char *hay, const char *needle)
+{
+    int nlen = strlen(needle);
+    for (const char *p = hay; *p; p++) {
+        int match = 1;
+        for (int i = 0; i < nlen; i++) {
+            if (p[i] != needle[i]) {
+                match = 0;
+                break;
+            }
+        }
+        if (match)
+            return 1;
+    }
+    return 0;
+}
+
 static int parse_field(const char *buf, const char *key)
 {
     int klen = strlen(key);
@@ -311,6 +328,7 @@ static void show_loading(int pid)
     proc_path[pi] = '\0';
 
     int bar_shown = 0;
+    unsigned long long start = get_ticks();
 
     while (1) {
         int fd = open_path(proc_path, O_RDONLY);
@@ -324,8 +342,11 @@ static void show_loading(int pid)
             break;
         buf[n] = '\0';
 
-        if (parse_field(buf, "LoadDone:\t"))
+        if (parse_field(buf, "LoadDone:\t") || contains(buf, "State:\tZ"))
             break;
+
+        if (get_ticks() - start < 50)
+            continue;
 
         int bytes_read = parse_field(buf, "LoadRead:\t");
         int bytes_total = parse_field(buf, "LoadTotal:\t");
