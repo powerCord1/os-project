@@ -13,10 +13,9 @@
 #include <wasm_api.h>
 #include <wali_defs.h>
 
-#include "wasm3.h"
-#include "m3_env.h"
+#include "wasm_runtime.h"
 
-#define WALI_PROC(ctx) ((wasm_process_t *)((ctx)->userdata))
+#define WALI_PROC(exec_env) ((wasm_process_t *)wasm_runtime_get_user_data(exec_env))
 
 #define WASM_PAGE_SIZE 65536
 #define MMAP_REGION_TOP 0xF0000000u
@@ -33,7 +32,6 @@ static void wali_stub_log(int nr)
     }
 }
 
-/* Helper: resolve path using cwd for relative paths */
 static bool wali_resolve_path(wasm_process_t *proc, const char *wasm_path,
                               char *out, int out_len)
 {
@@ -52,123 +50,122 @@ static bool wali_resolve_path(wasm_process_t *proc, const char *wasm_path,
     return true;
 }
 
-/* Helper: get a null-terminated string from wasm memory */
-static const char *wali_get_string(IM3Runtime runtime, int32_t offset)
+static const char *wali_get_string(wasm_exec_env_t exec_env, int32_t offset)
 {
-    uint32_t mem_size;
-    uint8_t *mem = m3_GetMemory(runtime, &mem_size, 0);
-    if (!mem || (uint32_t)offset >= mem_size)
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    if (!wasm_runtime_validate_app_str_addr(inst, (uint64_t)offset))
         return NULL;
-    return (const char *)(mem + offset);
+    return (const char *)wasm_runtime_addr_app_to_native(inst, (uint64_t)offset);
 }
 
-static void *wali_get_mem(IM3Runtime runtime, int32_t offset, uint32_t len)
+static void *wali_get_mem(wasm_exec_env_t exec_env, int32_t offset, uint32_t len)
 {
-    uint32_t mem_size;
-    uint8_t *mem = m3_GetMemory(runtime, &mem_size, 0);
-    if (!mem || (uint64_t)offset + len > mem_size)
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    if (!wasm_runtime_validate_app_addr(inst, (uint64_t)offset, (uint64_t)len))
         return NULL;
-    return mem + offset;
+    return wasm_runtime_addr_app_to_native(inst, (uint64_t)offset);
 }
 
-/* ---- Auxiliary functions (module "wali") ---- */
-
-m3ApiRawFunction(wali_init)
+static uint32_t wali_memory_size(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiReturn(0);
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    WASMModuleInstance *mi = (WASMModuleInstance *)inst;
+    if (mi->memory_count == 0)
+        return 0;
+    return mi->memories[0]->cur_page_count * WASM_PAGE_SIZE;
 }
 
-m3ApiRawFunction(wali_deinit)
+static bool wali_enlarge_memory(wasm_exec_env_t exec_env, uint32_t target_pages)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiReturn(0);
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    WASMModuleInstance *mi = (WASMModuleInstance *)inst;
+    uint32_t cur = mi->memories[0]->cur_page_count;
+    if (target_pages <= cur)
+        return true;
+    return wasm_runtime_enlarge_memory(inst, target_pages - cur);
 }
 
-m3ApiRawFunction(wali_proc_exit)
+static void wali_trap_exit(wasm_exec_env_t exec_env, int32_t code)
 {
-    m3ApiGetArg(int32_t, code)
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     proc->exit_code = code;
-    m3ApiTrap(m3Err_trapExit);
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    wasm_runtime_set_exception(inst, "wali exit");
 }
 
-m3ApiRawFunction(wali_cl_get_argc)
+static int32_t wali_init(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(uint32_t)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn((uint32_t)proc->argc);
+    (void)exec_env;
+    return 0;
 }
 
-m3ApiRawFunction(wali_cl_get_argv_len)
+static int32_t wali_deinit(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(uint32_t)
-    m3ApiGetArg(uint32_t, index)
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    (void)exec_env;
+    return 0;
+}
+
+static void wali_proc_exit(wasm_exec_env_t exec_env, int32_t code)
+{
+    wali_trap_exit(exec_env, code);
+}
+
+static uint32_t wali_cl_get_argc(wasm_exec_env_t exec_env)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return (uint32_t)proc->argc;
+}
+
+static uint32_t wali_cl_get_argv_len(wasm_exec_env_t exec_env, uint32_t index)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if ((int)index >= proc->argc)
-        m3ApiReturn(0);
-    m3ApiReturn((uint32_t)strlen(proc->argv[index]) + 1);
+        return 0;
+    return (uint32_t)strlen(proc->argv[index]) + 1;
 }
 
-m3ApiRawFunction(wali_cl_copy_argv)
+static int32_t wali_cl_copy_argv(wasm_exec_env_t exec_env, char *buf, uint32_t index)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(char *, buf)
-    m3ApiGetArg(uint32_t, index)
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if ((int)index >= proc->argc)
-        m3ApiReturn(-1);
+        return -1;
     uint32_t len = strlen(proc->argv[index]);
-    m3ApiCheckMem(buf, len + 1);
     memcpy(buf, proc->argv[index], len + 1);
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_get_init_envfile)
+static int32_t wali_get_init_envfile(wasm_exec_env_t exec_env, char *buf, uint32_t bufsize)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(char *, buf)
-    m3ApiGetArg(uint32_t, bufsize)
-    m3ApiCheckMem(buf, bufsize);
+    (void)exec_env;
     (void)buf;
-    m3ApiReturn(0);
+    (void)bufsize;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sigsetjmp)
+static int32_t wali_sigsetjmp(wasm_exec_env_t exec_env, int32_t buf, int32_t savesigs)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, buf)
-    m3ApiGetArg(int32_t, savesigs)
-    (void)buf; (void)savesigs;
-    m3ApiReturn(0);
+    (void)exec_env; (void)buf; (void)savesigs;
+    return 0;
 }
 
-m3ApiRawFunction(wali_setjmp)
+static int32_t wali_setjmp(wasm_exec_env_t exec_env, int32_t buf)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, buf)
-    (void)buf;
-    m3ApiReturn(0);
+    (void)exec_env; (void)buf;
+    return 0;
 }
 
-m3ApiRawFunction(wali_longjmp)
+static void wali_longjmp(wasm_exec_env_t exec_env, int32_t buf, int32_t val)
 {
-    m3ApiGetArg(int32_t, buf)
-    m3ApiGetArg(int32_t, val)
     (void)buf; (void)val;
-    m3ApiTrap("longjmp not supported");
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    wasm_runtime_set_exception(inst, "longjmp not supported");
 }
 
-m3ApiRawFunction(wali_thread_spawn)
+static int32_t wali_thread_spawn(wasm_exec_env_t exec_env, uint32_t fn, int32_t args)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(uint32_t, fn)
-    m3ApiGetArg(int32_t, args)
-    (void)fn; (void)args;
-    m3ApiReturn(-L_ENOSYS);
+    (void)exec_env; (void)fn; (void)args;
+    return -L_ENOSYS;
 }
-
-/* ---- fd I/O helpers ---- */
 
 static int64_t wali_do_write(wasm_process_t *proc, int32_t fd,
                              const uint8_t *buf, uint32_t count)
@@ -251,335 +248,268 @@ static int64_t wali_do_read(wasm_process_t *proc, int32_t fd,
     }
 }
 
-/* ---- Syscalls ---- */
-
-m3ApiRawFunction(wali_sys_brk)
+static int64_t wali_sys_brk(wasm_exec_env_t exec_env, uint32_t addr)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(uint32_t, addr)
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
 
     if (proc->brk_addr == 0) {
-        uint32_t mem_size = m3_GetMemorySize(runtime);
-        proc->brk_addr = mem_size;
+        proc->brk_addr = wali_memory_size(exec_env);
         proc->mmap_top = MMAP_REGION_TOP;
     }
 
-    if (addr == 0) {
-        m3ApiReturn((int64_t)proc->brk_addr);
-    }
+    if (addr == 0)
+        return (int64_t)proc->brk_addr;
 
     if (addr < proc->brk_addr) {
         proc->brk_addr = addr;
-        m3ApiReturn((int64_t)proc->brk_addr);
+        return (int64_t)proc->brk_addr;
     }
 
-    uint32_t mem_size = m3_GetMemorySize(runtime);
+    uint32_t mem_size = wali_memory_size(exec_env);
     if (addr > mem_size) {
         uint32_t pages_needed = (addr + WASM_PAGE_SIZE - 1) / WASM_PAGE_SIZE;
-        M3Result res = ResizeMemory(runtime, pages_needed);
-        if (res)
-            m3ApiReturn((int64_t)proc->brk_addr);
+        if (!wali_enlarge_memory(exec_env, pages_needed))
+            return (int64_t)proc->brk_addr;
     }
     proc->brk_addr = addr;
-    m3ApiReturn((int64_t)proc->brk_addr);
+    return (int64_t)proc->brk_addr;
 }
 
-m3ApiRawFunction(wali_sys_mmap)
+static int64_t wali_sys_mmap(wasm_exec_env_t exec_env, uint32_t addr,
+                              uint32_t length, int32_t prot, int32_t flags,
+                              int32_t fd, int64_t offset)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(uint32_t, addr)
-    m3ApiGetArg(uint32_t, length)
-    m3ApiGetArg(int32_t, prot)
-    m3ApiGetArg(int32_t, flags)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int64_t, offset)
     (void)prot; (void)offset;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
 
     if (proc->brk_addr == 0) {
-        proc->brk_addr = m3_GetMemorySize(runtime);
+        proc->brk_addr = wali_memory_size(exec_env);
         proc->mmap_top = MMAP_REGION_TOP;
     }
 
     if (!(flags & L_MAP_ANONYMOUS)) {
         (void)fd; (void)addr;
-        m3ApiReturn(-L_ENOSYS);
+        return -L_ENOSYS;
     }
 
     uint32_t aligned_len = (length + WASM_PAGE_SIZE - 1) & ~(WASM_PAGE_SIZE - 1);
     uint32_t alloc_addr = proc->mmap_top - aligned_len;
 
-    uint32_t mem_size = m3_GetMemorySize(runtime);
+    uint32_t mem_size = wali_memory_size(exec_env);
     if (alloc_addr + aligned_len > mem_size) {
         uint32_t pages_needed = (alloc_addr + aligned_len + WASM_PAGE_SIZE - 1) / WASM_PAGE_SIZE;
-        M3Result res = ResizeMemory(runtime, pages_needed);
-        if (res)
-            m3ApiReturn(-L_ENOMEM);
+        if (!wali_enlarge_memory(exec_env, pages_needed))
+            return -L_ENOMEM;
     }
 
     proc->mmap_top = alloc_addr;
 
-    uint8_t *mem = m3_GetMemory(runtime, &mem_size, 0);
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    uint8_t *mem = (uint8_t *)wasm_runtime_addr_app_to_native(inst, 0);
+    mem_size = wali_memory_size(exec_env);
     if (mem && alloc_addr + aligned_len <= mem_size)
         memset(mem + alloc_addr, 0, aligned_len);
 
-    m3ApiReturn((int64_t)alloc_addr);
+    return (int64_t)alloc_addr;
 }
 
-m3ApiRawFunction(wali_sys_munmap)
+static int64_t wali_sys_munmap(wasm_exec_env_t exec_env, uint32_t addr, uint32_t length)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(uint32_t, addr)
-    m3ApiGetArg(uint32_t, length)
-    (void)addr; (void)length;
-    m3ApiReturn(0);
+    (void)exec_env; (void)addr; (void)length;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_mprotect)
+static int64_t wali_sys_mprotect(wasm_exec_env_t exec_env, uint32_t addr,
+                                  uint32_t length, int32_t prot)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(uint32_t, addr)
-    m3ApiGetArg(uint32_t, length)
-    m3ApiGetArg(int32_t, prot)
-    (void)addr; (void)length; (void)prot;
-    m3ApiReturn(0);
+    (void)exec_env; (void)addr; (void)length; (void)prot;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_madvise)
+static int64_t wali_sys_madvise(wasm_exec_env_t exec_env, uint32_t addr,
+                                 uint32_t length, int32_t advice)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(uint32_t, addr)
-    m3ApiGetArg(uint32_t, length)
-    m3ApiGetArg(int32_t, advice)
-    (void)addr; (void)length; (void)advice;
-    m3ApiReturn(0);
+    (void)exec_env; (void)addr; (void)length; (void)advice;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_write)
+static int64_t wali_sys_write(wasm_exec_env_t exec_env, int32_t fd,
+                               int32_t buf_off, uint32_t count)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, count)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const uint8_t *buf = wali_get_mem(runtime, buf_off, count);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const uint8_t *buf = wali_get_mem(exec_env, buf_off, count);
     if (!buf)
-        m3ApiReturn(-L_EFAULT);
-    m3ApiReturn(wali_do_write(proc, fd, buf, count));
+        return -L_EFAULT;
+    return wali_do_write(proc, fd, buf, count);
 }
 
-m3ApiRawFunction(wali_sys_read)
+static int64_t wali_sys_read(wasm_exec_env_t exec_env, int32_t fd,
+                              int32_t buf_off, uint32_t count)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, count)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    uint8_t *buf = wali_get_mem(runtime, buf_off, count);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    uint8_t *buf = wali_get_mem(exec_env, buf_off, count);
     if (!buf)
-        m3ApiReturn(-L_EFAULT);
-    m3ApiReturn(wali_do_read(proc, fd, buf, count));
+        return -L_EFAULT;
+    return wali_do_read(proc, fd, buf, count);
 }
 
-m3ApiRawFunction(wali_sys_writev)
+static int64_t wali_sys_writev(wasm_exec_env_t exec_env, int32_t fd,
+                                int32_t iov_off, int32_t iovcnt)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, iov_off)
-    m3ApiGetArg(int32_t, iovcnt)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    wasm_iovec_t *iov = wali_get_mem(runtime, iov_off, iovcnt * sizeof(wasm_iovec_t));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    wasm_iovec_t *iov = wali_get_mem(exec_env, iov_off, iovcnt * sizeof(wasm_iovec_t));
     if (!iov)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     int64_t total = 0;
     for (int i = 0; i < iovcnt; i++) {
-        uint8_t *buf = wali_get_mem(runtime, iov[i].iov_base, iov[i].iov_len);
+        uint8_t *buf = wali_get_mem(exec_env, iov[i].iov_base, iov[i].iov_len);
         if (!buf)
-            m3ApiReturn(-L_EFAULT);
+            return -L_EFAULT;
         int64_t r = wali_do_write(proc, fd, buf, iov[i].iov_len);
         if (r < 0) {
             if (total > 0)
-                m3ApiReturn(total);
-            m3ApiReturn(r);
+                return total;
+            return r;
         }
         total += r;
     }
-    m3ApiReturn(total);
+    return total;
 }
 
-m3ApiRawFunction(wali_sys_readv)
+static int64_t wali_sys_readv(wasm_exec_env_t exec_env, int32_t fd,
+                               int32_t iov_off, int32_t iovcnt)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, iov_off)
-    m3ApiGetArg(int32_t, iovcnt)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    wasm_iovec_t *iov = wali_get_mem(runtime, iov_off, iovcnt * sizeof(wasm_iovec_t));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    wasm_iovec_t *iov = wali_get_mem(exec_env, iov_off, iovcnt * sizeof(wasm_iovec_t));
     if (!iov)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     int64_t total = 0;
     for (int i = 0; i < iovcnt; i++) {
-        uint8_t *buf = wali_get_mem(runtime, iov[i].iov_base, iov[i].iov_len);
+        uint8_t *buf = wali_get_mem(exec_env, iov[i].iov_base, iov[i].iov_len);
         if (!buf)
-            m3ApiReturn(-L_EFAULT);
+            return -L_EFAULT;
         int64_t r = wali_do_read(proc, fd, buf, iov[i].iov_len);
         if (r < 0) {
             if (total > 0)
-                m3ApiReturn(total);
-            m3ApiReturn(r);
+                return total;
+            return r;
         }
         total += r;
         if (r < (int64_t)iov[i].iov_len)
             break;
     }
-    m3ApiReturn(total);
+    return total;
 }
 
-m3ApiRawFunction(wali_sys_exit)
+static int64_t wali_sys_exit(wasm_exec_env_t exec_env, int32_t code)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, code)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    proc->exit_code = code;
-    m3ApiTrap(m3Err_trapExit);
+    wali_trap_exit(exec_env, code);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_exit_group)
+static int64_t wali_sys_exit_group(wasm_exec_env_t exec_env, int32_t code)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, code)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    proc->exit_code = code;
-    m3ApiTrap(m3Err_trapExit);
+    wali_trap_exit(exec_env, code);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_set_tid_address)
+static int64_t wali_sys_set_tid_address(wasm_exec_env_t exec_env, int32_t tidptr)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, tidptr)
     (void)tidptr;
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn((int64_t)proc->pid);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return (int64_t)proc->pid;
 }
 
-m3ApiRawFunction(wali_sys_rt_sigaction)
+static int64_t wali_sys_rt_sigaction(wasm_exec_env_t exec_env, int32_t signum,
+                                      int32_t act, int32_t oldact, uint32_t sigsetsize)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, signum)
-    m3ApiGetArg(int32_t, act)
-    m3ApiGetArg(int32_t, oldact)
-    m3ApiGetArg(uint32_t, sigsetsize)
-    (void)signum; (void)act; (void)oldact; (void)sigsetsize;
-    m3ApiReturn(0);
+    (void)exec_env; (void)signum; (void)act; (void)oldact; (void)sigsetsize;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_rt_sigprocmask)
+static int64_t wali_sys_rt_sigprocmask(wasm_exec_env_t exec_env, int32_t how,
+                                        int32_t set, int32_t oldset, uint32_t sigsetsize)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, how)
-    m3ApiGetArg(int32_t, set)
-    m3ApiGetArg(int32_t, oldset)
-    m3ApiGetArg(uint32_t, sigsetsize)
-    (void)how; (void)set; (void)oldset; (void)sigsetsize;
-    m3ApiReturn(0);
+    (void)exec_env; (void)how; (void)set; (void)oldset; (void)sigsetsize;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_sigaltstack)
+static int64_t wali_sys_sigaltstack(wasm_exec_env_t exec_env, int32_t ss, int32_t old_ss)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, ss)
-    m3ApiGetArg(int32_t, old_ss)
-    (void)ss; (void)old_ss;
-    m3ApiReturn(0);
+    (void)exec_env; (void)ss; (void)old_ss;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getpid)
+static int64_t wali_sys_getpid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn((int64_t)proc->pid);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return (int64_t)proc->pid;
 }
 
-m3ApiRawFunction(wali_sys_gettid)
+static int64_t wali_sys_gettid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn((int64_t)proc->pid);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return (int64_t)proc->pid;
 }
 
-m3ApiRawFunction(wali_sys_getuid)
+static int64_t wali_sys_getuid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiReturn(0);
+    (void)exec_env;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getgid)
+static int64_t wali_sys_getgid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiReturn(0);
+    (void)exec_env;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_geteuid)
+static int64_t wali_sys_geteuid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiReturn(0);
+    (void)exec_env;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getegid)
+static int64_t wali_sys_getegid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiReturn(0);
+    (void)exec_env;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getppid)
+static int64_t wali_sys_getppid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     proc_entry_t *e = proc_get(proc->pid);
-    m3ApiReturn(e ? (int64_t)e->parent_pid : 0);
+    return e ? (int64_t)e->parent_pid : 0;
 }
 
-m3ApiRawFunction(wali_sys_getpgid)
+static int64_t wali_sys_getpgid(wasm_exec_env_t exec_env, int32_t pid)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pid)
     (void)pid;
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn((int64_t)proc->pid);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return (int64_t)proc->pid;
 }
 
-m3ApiRawFunction(wali_sys_setpgid)
+static int64_t wali_sys_setpgid(wasm_exec_env_t exec_env, int32_t pid, int32_t pgid)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pid)
-    m3ApiGetArg(int32_t, pgid)
-    (void)pid; (void)pgid;
-    m3ApiReturn(0);
+    (void)exec_env; (void)pid; (void)pgid;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_setsid)
+static int64_t wali_sys_setsid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn((int64_t)proc->pid);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return (int64_t)proc->pid;
 }
 
-m3ApiRawFunction(wali_sys_sched_yield)
+static int64_t wali_sys_sched_yield(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
+    (void)exec_env;
     scheduler_yield();
-    m3ApiReturn(0);
+    return 0;
 }
-
-/* ---- Phase 2: File I/O ---- */
 
 static int wali_fd_alloc(wasm_process_t *proc)
 {
@@ -678,49 +608,35 @@ static int64_t wali_do_open(wasm_process_t *proc, const char *pathname, int32_t 
     return fd;
 }
 
-m3ApiRawFunction(wali_sys_open)
+static int64_t wali_sys_open(wasm_exec_env_t exec_env, int32_t pathname_off,
+                              int32_t flags, int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, flags)
-    m3ApiGetArg(int32_t, mode)
     (void)mode;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
-    m3ApiReturn(wali_do_open(proc, pathname, flags));
+        return -L_EFAULT;
+    return wali_do_open(proc, pathname, flags);
 }
 
-m3ApiRawFunction(wali_sys_openat)
+static int64_t wali_sys_openat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                int32_t pathname_off, int32_t flags, int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, dirfd)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, flags)
-    m3ApiGetArg(int32_t, mode)
     (void)mode;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
-
-    if (dirfd == L_AT_FDCWD || pathname[0] == '/') {
-        m3ApiReturn(wali_do_open(proc, pathname, flags));
-    }
-    m3ApiReturn(-L_ENOSYS);
+        return -L_EFAULT;
+    if (dirfd == L_AT_FDCWD || pathname[0] == '/')
+        return wali_do_open(proc, pathname, flags);
+    return -L_ENOSYS;
 }
 
-m3ApiRawFunction(wali_sys_close)
+static int64_t wali_sys_close(wasm_exec_env_t exec_env, int32_t fd)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
@@ -744,36 +660,32 @@ m3ApiRawFunction(wali_sys_close)
     }
     memset(f, 0, sizeof(wasm_fd_t));
     proc->fd_flags[fd] = 0;
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_lseek)
+static int64_t wali_sys_lseek(wasm_exec_env_t exec_env, int32_t fd,
+                               int64_t offset, int32_t whence)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int64_t, offset)
-    m3ApiGetArg(int32_t, whence)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
     wasm_fd_t *f = &proc->fds[fd];
     if (f->type == FD_CONSOLE)
-        m3ApiReturn(-L_ESPIPE);
+        return -L_ESPIPE;
     if (f->type != FD_FILE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
     int64_t new_pos;
     switch (whence) {
     case 0: new_pos = offset; break;
     case 1: new_pos = (int64_t)f->file.pos + offset; break;
     case 2: new_pos = (int64_t)f->file.size + offset; break;
-    default: m3ApiReturn(-L_EINVAL);
+    default: return -L_EINVAL;
     }
     if (new_pos < 0)
-        m3ApiReturn(-L_EINVAL);
+        return -L_EINVAL;
     f->file.pos = (uint32_t)new_pos;
-    m3ApiReturn(new_pos);
+    return new_pos;
 }
 
 static void wali_fill_stat(linux_stat_t *st, uint32_t size, uint32_t mode)
@@ -823,213 +735,179 @@ static int64_t wali_do_stat_path(wasm_process_t *proc, const char *pathname,
     return 0;
 }
 
-m3ApiRawFunction(wali_sys_stat)
+static int64_t wali_sys_stat(wasm_exec_env_t exec_env, int32_t pathname_off,
+                              int32_t statbuf_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, statbuf_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
-    linux_stat_t *st = wali_get_mem(runtime, statbuf_off, sizeof(linux_stat_t));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
+    linux_stat_t *st = wali_get_mem(exec_env, statbuf_off, sizeof(linux_stat_t));
     if (!pathname || !st)
-        m3ApiReturn(-L_EFAULT);
-    m3ApiReturn(wali_do_stat_path(proc, pathname, st));
+        return -L_EFAULT;
+    return wali_do_stat_path(proc, pathname, st);
 }
 
-m3ApiRawFunction(wali_sys_lstat)
+static int64_t wali_sys_lstat(wasm_exec_env_t exec_env, int32_t pathname_off,
+                               int32_t statbuf_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, statbuf_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
-    linux_stat_t *st = wali_get_mem(runtime, statbuf_off, sizeof(linux_stat_t));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
+    linux_stat_t *st = wali_get_mem(exec_env, statbuf_off, sizeof(linux_stat_t));
     if (!pathname || !st)
-        m3ApiReturn(-L_EFAULT);
-    m3ApiReturn(wali_do_stat_path(proc, pathname, st));
+        return -L_EFAULT;
+    return wali_do_stat_path(proc, pathname, st);
 }
 
-m3ApiRawFunction(wali_sys_fstat)
+static int64_t wali_sys_fstat(wasm_exec_env_t exec_env, int32_t fd, int32_t statbuf_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, statbuf_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    linux_stat_t *st = wali_get_mem(runtime, statbuf_off, sizeof(linux_stat_t));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    linux_stat_t *st = wali_get_mem(exec_env, statbuf_off, sizeof(linux_stat_t));
     if (!st)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
     if (fd < 0 || fd >= WASM_MAX_FDS)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
     case FD_CONSOLE:
         wali_fill_stat(st, 0, L_S_IFCHR | 0620);
-        m3ApiReturn(0);
+        return 0;
     case FD_FILE:
         wali_fill_stat(st, f->file.size, L_S_IFREG | 0644);
-        m3ApiReturn(0);
+        return 0;
     case FD_PIPE_READ:
     case FD_PIPE_WRITE:
         wali_fill_stat(st, 0, L_S_IFIFO | 0600);
-        m3ApiReturn(0);
+        return 0;
     default:
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
     }
 }
 
-m3ApiRawFunction(wali_sys_newfstatat)
+static int64_t wali_sys_newfstatat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                    int32_t pathname_off, int32_t statbuf_off,
+                                    int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, dirfd)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, statbuf_off)
-    m3ApiGetArg(int32_t, flags)
-    (void)flags;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
-    linux_stat_t *st = wali_get_mem(runtime, statbuf_off, sizeof(linux_stat_t));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
+    linux_stat_t *st = wali_get_mem(exec_env, statbuf_off, sizeof(linux_stat_t));
     if (!pathname || !st)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     if (pathname[0] == '\0' && (flags & 0x1000)) {
         if (dirfd < 0 || dirfd >= WASM_MAX_FDS)
-            m3ApiReturn(-L_EBADF);
+            return -L_EBADF;
         wasm_fd_t *f = &proc->fds[dirfd];
         if (f->type == FD_CONSOLE)
             wali_fill_stat(st, 0, L_S_IFCHR | 0620);
         else if (f->type == FD_FILE)
             wali_fill_stat(st, f->file.size, L_S_IFREG | 0644);
         else
-            m3ApiReturn(-L_EBADF);
-        m3ApiReturn(0);
+            return -L_EBADF;
+        return 0;
     }
 
     if (dirfd != L_AT_FDCWD && pathname[0] != '/')
-        m3ApiReturn(-L_ENOSYS);
+        return -L_ENOSYS;
 
-    m3ApiReturn(wali_do_stat_path(proc, pathname, st));
+    return wali_do_stat_path(proc, pathname, st);
 }
 
-m3ApiRawFunction(wali_sys_access)
+static int64_t wali_sys_access(wasm_exec_env_t exec_env, int32_t pathname_off,
+                                int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, mode)
     (void)mode;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
 
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
         if (filename) free(filename);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     free(filename);
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_faccessat)
+static int64_t wali_sys_faccessat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                   int32_t pathname_off, int32_t mode, int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, dirfd)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, mode)
-    m3ApiGetArg(int32_t, flags)
     (void)mode; (void)flags;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
     if (dirfd != L_AT_FDCWD && pathname[0] != '/')
-        m3ApiReturn(-L_ENOSYS);
+        return -L_ENOSYS;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
         if (filename) free(filename);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     free(filename);
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getcwd)
+static int64_t wali_sys_getcwd(wasm_exec_env_t exec_env, int32_t buf_off, uint32_t size)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, size)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     uint32_t len = strlen(proc->cwd) + 1;
     if (size < len)
-        m3ApiReturn(-L_ERANGE);
-    char *buf = wali_get_mem(runtime, buf_off, len);
+        return -L_ERANGE;
+    char *buf = wali_get_mem(exec_env, buf_off, len);
     if (!buf)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
     memcpy(buf, proc->cwd, len);
-    m3ApiReturn((int64_t)buf_off);
+    return (int64_t)buf_off;
 }
 
-m3ApiRawFunction(wali_sys_chdir)
+static int64_t wali_sys_chdir(wasm_exec_env_t exec_env, int32_t path_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, path_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *path = wali_get_string(runtime, path_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *path = wali_get_string(exec_env, path_off);
     if (!path)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, path, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
 
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
         if (filename) free(filename);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     free(filename);
 
     strncpy(proc->cwd, pathbuf, sizeof(proc->cwd) - 1);
     proc->cwd[sizeof(proc->cwd) - 1] = '\0';
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_fcntl)
+static int64_t wali_sys_fcntl(wasm_exec_env_t exec_env, int32_t fd,
+                               int32_t cmd, uint64_t arg)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, cmd)
-    m3ApiGetArg(uint64_t, arg)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
     switch (cmd) {
     case L_F_DUPFD: {
         int new_fd = wali_fd_alloc_from(proc, (int)arg);
         if (new_fd < 0)
-            m3ApiReturn(-L_EMFILE);
+            return -L_EMFILE;
         proc->fds[new_fd] = proc->fds[fd];
         if (proc->fds[new_fd].type == FD_PIPE_READ)
             pipe_ref_read(proc->fds[new_fd].pipe.pipe_id);
@@ -1041,38 +919,35 @@ m3ApiRawFunction(wali_sys_fcntl)
             if (sz) memcpy(copy, proc->fds[fd].file.data, sz);
             proc->fds[new_fd].file.data = copy;
         }
-        m3ApiReturn(new_fd);
+        return new_fd;
     }
     case L_F_GETFD:
-        m3ApiReturn((int64_t)proc->fd_flags[fd]);
+        return (int64_t)proc->fd_flags[fd];
     case L_F_SETFD:
         proc->fd_flags[fd] = (uint32_t)arg;
-        m3ApiReturn(0);
+        return 0;
     case L_F_GETFL:
         if (proc->fds[fd].type == FD_FILE)
-            m3ApiReturn((int64_t)proc->fds[fd].file.flags);
-        m3ApiReturn(0);
+            return (int64_t)proc->fds[fd].file.flags;
+        return 0;
     case L_F_SETFL:
         if (proc->fds[fd].type == FD_FILE)
             proc->fds[fd].file.flags = (uint32_t)arg;
-        m3ApiReturn(0);
+        return 0;
     default:
-        m3ApiReturn(-L_EINVAL);
+        return -L_EINVAL;
     }
 }
 
-m3ApiRawFunction(wali_sys_dup)
+static int64_t wali_sys_dup(wasm_exec_env_t exec_env, int32_t oldfd)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, oldfd)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (oldfd < 0 || oldfd >= WASM_MAX_FDS || proc->fds[oldfd].type == FD_NONE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
     int newfd = wali_fd_alloc(proc);
     if (newfd < 0)
-        m3ApiReturn(-L_EMFILE);
+        return -L_EMFILE;
 
     proc->fds[newfd] = proc->fds[oldfd];
     if (proc->fds[newfd].type == FD_PIPE_READ)
@@ -1085,7 +960,7 @@ m3ApiRawFunction(wali_sys_dup)
         if (sz) memcpy(copy, proc->fds[oldfd].file.data, sz);
         proc->fds[newfd].file.data = copy;
     }
-    m3ApiReturn(newfd);
+    return newfd;
 }
 
 static int64_t wali_do_dup2(wasm_process_t *proc, int32_t oldfd, int32_t newfd)
@@ -1132,41 +1007,32 @@ static int64_t wali_do_dup2(wasm_process_t *proc, int32_t oldfd, int32_t newfd)
     return newfd;
 }
 
-m3ApiRawFunction(wali_sys_dup2)
+static int64_t wali_sys_dup2(wasm_exec_env_t exec_env, int32_t oldfd, int32_t newfd)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, oldfd)
-    m3ApiGetArg(int32_t, newfd)
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    m3ApiReturn(wali_do_dup2(proc, oldfd, newfd));
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    return wali_do_dup2(proc, oldfd, newfd);
 }
 
-m3ApiRawFunction(wali_sys_dup3)
+static int64_t wali_sys_dup3(wasm_exec_env_t exec_env, int32_t oldfd,
+                              int32_t newfd, int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, oldfd)
-    m3ApiGetArg(int32_t, newfd)
-    m3ApiGetArg(int32_t, flags)
     (void)flags;
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (oldfd == newfd)
-        m3ApiReturn(-L_EINVAL);
-    m3ApiReturn(wali_do_dup2(proc, oldfd, newfd));
+        return -L_EINVAL;
+    return wali_do_dup2(proc, oldfd, newfd);
 }
 
-m3ApiRawFunction(wali_sys_pipe)
+static int64_t wali_sys_pipe(wasm_exec_env_t exec_env, int32_t pipefd_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pipefd_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    int32_t *fds = wali_get_mem(runtime, pipefd_off, 8);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    int32_t *fds = wali_get_mem(exec_env, pipefd_off, 8);
     if (!fds)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     int pipe_id = pipe_alloc();
     if (pipe_id < 0)
-        m3ApiReturn(-L_EMFILE);
+        return -L_EMFILE;
 
     int rfd = -1, wfd = -1;
     for (int i = 3; i < WASM_MAX_FDS && (rfd < 0 || wfd < 0); i++) {
@@ -1178,7 +1044,7 @@ m3ApiRawFunction(wali_sys_pipe)
     if (rfd < 0 || wfd < 0) {
         pipe_unref_read(pipe_id);
         pipe_unref_write(pipe_id);
-        m3ApiReturn(-L_EMFILE);
+        return -L_EMFILE;
     }
 
     proc->fds[rfd].type = FD_PIPE_READ;
@@ -1188,71 +1054,34 @@ m3ApiRawFunction(wali_sys_pipe)
 
     fds[0] = rfd;
     fds[1] = wfd;
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_pipe2)
+static int64_t wali_sys_pipe2(wasm_exec_env_t exec_env, int32_t pipefd_off, int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pipefd_off)
-    m3ApiGetArg(int32_t, flags)
     (void)flags;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    int32_t *fds = wali_get_mem(runtime, pipefd_off, 8);
-    if (!fds)
-        m3ApiReturn(-L_EFAULT);
-
-    int pipe_id = pipe_alloc();
-    if (pipe_id < 0)
-        m3ApiReturn(-L_EMFILE);
-
-    int rfd = -1, wfd = -1;
-    for (int i = 3; i < WASM_MAX_FDS && (rfd < 0 || wfd < 0); i++) {
-        if (proc->fds[i].type == FD_NONE) {
-            if (rfd < 0) rfd = i;
-            else wfd = i;
-        }
-    }
-    if (rfd < 0 || wfd < 0) {
-        pipe_unref_read(pipe_id);
-        pipe_unref_write(pipe_id);
-        m3ApiReturn(-L_EMFILE);
-    }
-
-    proc->fds[rfd].type = FD_PIPE_READ;
-    proc->fds[rfd].pipe.pipe_id = pipe_id;
-    proc->fds[wfd].type = FD_PIPE_WRITE;
-    proc->fds[wfd].pipe.pipe_id = pipe_id;
-
-    fds[0] = rfd;
-    fds[1] = wfd;
-    m3ApiReturn(0);
+    return wali_sys_pipe(exec_env, pipefd_off);
 }
 
-m3ApiRawFunction(wali_sys_getdents64)
+static int64_t wali_sys_getdents64(wasm_exec_env_t exec_env, int32_t fd,
+                                    int32_t dirp_off, int32_t count)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, dirp_off)
-    m3ApiGetArg(int32_t, count)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type != FD_FILE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
-    uint8_t *dirp = wali_get_mem(runtime, dirp_off, count);
+    uint8_t *dirp = wali_get_mem(exec_env, dirp_off, count);
     if (!dirp)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     wasm_fd_t *f = &proc->fds[fd];
     if (f->file.pos != 0)
-        m3ApiReturn(0);
+        return 0;
 
     int nentries = 0;
     char **entries = vfs_list_directory(f->file.parent_cluster, &nentries);
     if (!entries)
-        m3ApiReturn(-L_ENOTDIR);
+        return -L_ENOTDIR;
 
     int pos = 0;
     for (int i = 0; i < nentries; i++) {
@@ -1266,9 +1095,9 @@ m3ApiRawFunction(wali_sys_getdents64)
                 free(entries[j]);
             free(entries);
             if (pos == 0)
-                m3ApiReturn(-L_EINVAL);
+                return -L_EINVAL;
             f->file.pos = 1;
-            m3ApiReturn(pos);
+            return pos;
         }
 
         linux_dirent64_t *ent = (linux_dirent64_t *)(dirp + pos);
@@ -1283,57 +1112,50 @@ m3ApiRawFunction(wali_sys_getdents64)
     free(entries);
 
     f->file.pos = 1;
-    m3ApiReturn(pos);
+    return pos;
 }
 
-m3ApiRawFunction(wali_sys_unlink)
+static int64_t wali_sys_unlink(wasm_exec_env_t exec_env, int32_t pathname_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
 
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
         if (filename) free(filename);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     bool ok = vfs_delete_file(parent_cluster, filename);
     free(filename);
-    m3ApiReturn(ok ? 0 : -L_ENOENT);
+    return ok ? 0 : -L_ENOENT;
 }
 
-m3ApiRawFunction(wali_sys_unlinkat)
+static int64_t wali_sys_unlinkat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                  int32_t pathname_off, int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, dirfd)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, flags)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
     if (dirfd != L_AT_FDCWD && pathname[0] != '/')
-        m3ApiReturn(-L_ENOSYS);
+        return -L_ENOSYS;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
 
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
         if (filename) free(filename);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
 
     bool ok;
@@ -1342,131 +1164,110 @@ m3ApiRawFunction(wali_sys_unlinkat)
     else
         ok = vfs_delete_file(parent_cluster, filename);
     free(filename);
-    m3ApiReturn(ok ? 0 : -L_ENOENT);
+    return ok ? 0 : -L_ENOENT;
 }
 
-m3ApiRawFunction(wali_sys_rename)
+static int64_t wali_sys_rename(wasm_exec_env_t exec_env, int32_t oldpath_off,
+                                int32_t newpath_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, oldpath_off)
-    m3ApiGetArg(int32_t, newpath_off)
-    (void)oldpath_off; (void)newpath_off;
+    (void)exec_env; (void)oldpath_off; (void)newpath_off;
     wali_stub_log(SYS_RENAME);
-    m3ApiReturn(-L_ENOSYS);
+    return -L_ENOSYS;
 }
 
-m3ApiRawFunction(wali_sys_renameat2)
+static int64_t wali_sys_renameat2(wasm_exec_env_t exec_env, int32_t olddirfd,
+                                   int32_t oldpath_off, int32_t newdirfd,
+                                   int32_t newpath_off, int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, olddirfd)
-    m3ApiGetArg(int32_t, oldpath_off)
-    m3ApiGetArg(int32_t, newdirfd)
-    m3ApiGetArg(int32_t, newpath_off)
-    m3ApiGetArg(int32_t, flags)
-    (void)olddirfd; (void)oldpath_off; (void)newdirfd;
-    (void)newpath_off; (void)flags;
+    (void)exec_env; (void)olddirfd; (void)oldpath_off;
+    (void)newdirfd; (void)newpath_off; (void)flags;
     wali_stub_log(SYS_RENAMEAT2);
-    m3ApiReturn(-L_ENOSYS);
+    return -L_ENOSYS;
 }
 
-m3ApiRawFunction(wali_sys_mkdir)
+static int64_t wali_sys_mkdir(wasm_exec_env_t exec_env, int32_t pathname_off, int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, mode)
     (void)mode;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
 
     uint32_t parent_cluster;
     char *dirname = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
         if (dirname) free(dirname);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     bool ok = vfs_create_directory(parent_cluster, dirname);
     free(dirname);
-    m3ApiReturn(ok ? 0 : -L_EEXIST);
+    return ok ? 0 : -L_EEXIST;
 }
 
-m3ApiRawFunction(wali_sys_mkdirat)
+static int64_t wali_sys_mkdirat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                 int32_t pathname_off, int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, dirfd)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, mode)
     (void)mode;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
     if (dirfd != L_AT_FDCWD && pathname[0] != '/')
-        m3ApiReturn(-L_ENOSYS);
+        return -L_ENOSYS;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
     uint32_t parent_cluster;
     char *dirname = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
         if (dirname) free(dirname);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     bool ok = vfs_create_directory(parent_cluster, dirname);
     free(dirname);
-    m3ApiReturn(ok ? 0 : -L_EEXIST);
+    return ok ? 0 : -L_EEXIST;
 }
 
-m3ApiRawFunction(wali_sys_rmdir)
+static int64_t wali_sys_rmdir(wasm_exec_env_t exec_env, int32_t pathname_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    const char *pathname = wali_get_string(runtime, pathname_off);
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    const char *pathname = wali_get_string(exec_env, pathname_off);
     if (!pathname)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
-        m3ApiReturn(-L_ENAMETOOLONG);
+        return -L_ENAMETOOLONG;
     uint32_t parent_cluster;
     char *dirname = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
         if (dirname) free(dirname);
-        m3ApiReturn(-L_ENOENT);
+        return -L_ENOENT;
     }
     bool ok = vfs_delete_directory(parent_cluster, dirname);
     free(dirname);
-    m3ApiReturn(ok ? 0 : -L_ENOTEMPTY);
+    return ok ? 0 : -L_ENOTEMPTY;
 }
 
-m3ApiRawFunction(wali_sys_ftruncate)
+static int64_t wali_sys_ftruncate(wasm_exec_env_t exec_env, int32_t fd, int64_t length)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int64_t, length)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type != FD_FILE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
     wasm_fd_t *f = &proc->fds[fd];
     if (!f->file.writable)
-        m3ApiReturn(-L_EINVAL);
+        return -L_EINVAL;
 
     uint32_t new_size = (uint32_t)length;
     if (new_size != f->file.size) {
         uint8_t *new_data = realloc(f->file.data, new_size ? new_size : 1);
         if (!new_data && new_size)
-            m3ApiReturn(-L_ENOMEM);
+            return -L_ENOMEM;
         if (new_size > f->file.size)
             memset(new_data + f->file.size, 0, new_size - f->file.size);
         f->file.data = new_data;
@@ -1475,115 +1276,93 @@ m3ApiRawFunction(wali_sys_ftruncate)
             f->file.pos = new_size;
         f->file.dirty = true;
     }
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_fsync)
+static int64_t wali_sys_fsync(wasm_exec_env_t exec_env, int32_t fd)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
     wasm_fd_t *f = &proc->fds[fd];
     if (f->type == FD_FILE && f->file.dirty && f->file.data) {
         vfs_write_file(f->file.parent_cluster, f->file.filename,
                        f->file.data, f->file.size);
         f->file.dirty = false;
     }
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_pread64)
+static int64_t wali_sys_pread64(wasm_exec_env_t exec_env, int32_t fd,
+                                 int32_t buf_off, uint32_t count, int64_t offset)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, count)
-    m3ApiGetArg(int64_t, offset)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type != FD_FILE)
-        m3ApiReturn(-L_EBADF);
-    uint8_t *buf = wali_get_mem(runtime, buf_off, count);
+        return -L_EBADF;
+    uint8_t *buf = wali_get_mem(exec_env, buf_off, count);
     if (!buf)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     wasm_fd_t *f = &proc->fds[fd];
     uint32_t off = (uint32_t)offset;
     if (off >= f->file.size)
-        m3ApiReturn(0);
+        return 0;
     uint32_t avail = f->file.size - off;
     if (count > avail) count = avail;
     memcpy(buf, f->file.data + off, count);
-    m3ApiReturn((int64_t)count);
+    return (int64_t)count;
 }
 
-m3ApiRawFunction(wali_sys_pwrite64)
+static int64_t wali_sys_pwrite64(wasm_exec_env_t exec_env, int32_t fd,
+                                  int32_t buf_off, uint32_t count, int64_t offset)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, count)
-    m3ApiGetArg(int64_t, offset)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type != FD_FILE)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
     if (!proc->fds[fd].file.writable)
-        m3ApiReturn(-L_EBADF);
-    const uint8_t *buf = wali_get_mem(runtime, buf_off, count);
+        return -L_EBADF;
+    const uint8_t *buf = wali_get_mem(exec_env, buf_off, count);
     if (!buf)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     wasm_fd_t *f = &proc->fds[fd];
     uint32_t off = (uint32_t)offset;
     uint32_t end = off + count;
     if (end > f->file.size) {
         uint8_t *new_data = realloc(f->file.data, end);
-        if (!new_data) m3ApiReturn(-L_ENOMEM);
+        if (!new_data) return -L_ENOMEM;
         memset(new_data + f->file.size, 0, end - f->file.size);
         f->file.data = new_data;
         f->file.size = end;
     }
     memcpy(f->file.data + off, buf, count);
     f->file.dirty = true;
-    m3ApiReturn((int64_t)count);
+    return (int64_t)count;
 }
 
-m3ApiRawFunction(wali_sys_readlink)
+static int64_t wali_sys_readlink(wasm_exec_env_t exec_env, int32_t pathname_off,
+                                  int32_t buf_off, uint32_t bufsiz)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, bufsiz)
-    (void)pathname_off; (void)buf_off; (void)bufsiz;
-    m3ApiReturn(-L_EINVAL);
+    (void)exec_env; (void)pathname_off; (void)buf_off; (void)bufsiz;
+    return -L_EINVAL;
 }
 
-/* ---- Phase 3: Terminal / ioctl ---- */
-
-m3ApiRawFunction(wali_sys_ioctl)
+static int64_t wali_sys_ioctl(wasm_exec_env_t exec_env, int32_t fd,
+                               int32_t request, int32_t argp_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, request)
-    m3ApiGetArg(int32_t, argp_off)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
-        m3ApiReturn(-L_EBADF);
+        return -L_EBADF;
 
     if (proc->fds[fd].type != FD_CONSOLE)
-        m3ApiReturn(-L_ENOTTY);
+        return -L_ENOTTY;
 
     tty_t *tty = tty_get(proc->tty_id);
 
     switch (request) {
     case L_TCGETS: {
-        linux_termios_t *t = wali_get_mem(runtime, argp_off, sizeof(linux_termios_t));
-        if (!t) m3ApiReturn(-L_EFAULT);
+        linux_termios_t *t = wali_get_mem(exec_env, argp_off, sizeof(linux_termios_t));
+        if (!t) return -L_EFAULT;
         memset(t, 0, sizeof(linux_termios_t));
         t->c_iflag = proc->c_iflag;
         t->c_oflag = proc->c_oflag;
@@ -1592,13 +1371,13 @@ m3ApiRawFunction(wali_sys_ioctl)
         memcpy(t->c_cc, proc->c_cc, sizeof(proc->c_cc));
         t->c_ispeed = 38400;
         t->c_ospeed = 38400;
-        m3ApiReturn(0);
+        return 0;
     }
     case L_TCSETS:
     case L_TCSETSW:
     case L_TCSETSF: {
-        linux_termios_t *t = wali_get_mem(runtime, argp_off, sizeof(linux_termios_t));
-        if (!t) m3ApiReturn(-L_EFAULT);
+        linux_termios_t *t = wali_get_mem(exec_env, argp_off, sizeof(linux_termios_t));
+        if (!t) return -L_EFAULT;
         proc->c_iflag = t->c_iflag;
         proc->c_oflag = t->c_oflag;
         proc->c_cflag = t->c_cflag;
@@ -1612,42 +1391,38 @@ m3ApiRawFunction(wali_sys_ioctl)
 
         if (request == L_TCSETSF)
             tty_input_flush(tty);
-        m3ApiReturn(0);
+        return 0;
     }
     case L_TIOCGWINSZ: {
-        linux_winsize_t *ws = wali_get_mem(runtime, argp_off, sizeof(linux_winsize_t));
-        if (!ws) m3ApiReturn(-L_EFAULT);
+        linux_winsize_t *ws = wali_get_mem(exec_env, argp_off, sizeof(linux_winsize_t));
+        if (!ws) return -L_EFAULT;
         ws->ws_row = tty->rows;
         ws->ws_col = tty->cols;
         ws->ws_xpixel = 0;
         ws->ws_ypixel = 0;
-        m3ApiReturn(0);
+        return 0;
     }
     case L_FIONREAD: {
-        int32_t *np = wali_get_mem(runtime, argp_off, 4);
-        if (!np) m3ApiReturn(-L_EFAULT);
+        int32_t *np = wali_get_mem(exec_env, argp_off, 4);
+        if (!np) return -L_EFAULT;
         uint16_t h = tty->input_head;
-        uint16_t t = tty->input_tail;
-        *np = (h >= t) ? (h - t) : (TTY_INPUT_BUF_SIZE - t + h);
-        m3ApiReturn(0);
+        uint16_t t2 = tty->input_tail;
+        *np = (h >= t2) ? (h - t2) : (TTY_INPUT_BUF_SIZE - t2 + h);
+        return 0;
     }
     default:
-        m3ApiReturn(-L_ENOTTY);
+        return -L_ENOTTY;
     }
 }
 
-m3ApiRawFunction(wali_sys_poll)
+static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
+                              uint64_t nfds, int32_t timeout)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fds_off)
-    m3ApiGetArg(uint64_t, nfds)
-    m3ApiGetArg(int32_t, timeout)
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    linux_pollfd_t *pfds = wali_get_mem(runtime, fds_off,
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    linux_pollfd_t *pfds = wali_get_mem(exec_env, fds_off,
                                         (uint32_t)(nfds * sizeof(linux_pollfd_t)));
     if (!pfds)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     uint64_t deadline = 0;
     if (timeout > 0)
@@ -1718,31 +1493,26 @@ m3ApiRawFunction(wali_sys_poll)
 
         proc_entry_t *e = proc_get(proc->pid);
         if (e && e->killed)
-            m3ApiReturn(-L_EINTR);
+            return -L_EINTR;
     } while (1);
 
-    m3ApiReturn((int64_t)ready);
+    return (int64_t)ready;
 }
 
-m3ApiRawFunction(wali_sys_ppoll)
+static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
+                               uint64_t nfds, int32_t tmo_off,
+                               int32_t sigmask, uint32_t sigsetsize)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fds_off)
-    m3ApiGetArg(uint64_t, nfds)
-    m3ApiGetArg(int32_t, tmo_off)
-    m3ApiGetArg(int32_t, sigmask)
-    m3ApiGetArg(uint32_t, sigsetsize)
     (void)sigmask; (void)sigsetsize;
-
-    wasm_process_t *proc = WALI_PROC(_ctx);
-    linux_pollfd_t *pfds = wali_get_mem(runtime, fds_off,
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    linux_pollfd_t *pfds = wali_get_mem(exec_env, fds_off,
                                         (uint32_t)(nfds * sizeof(linux_pollfd_t)));
     if (!pfds)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     int32_t timeout_ms = -1;
     if (tmo_off) {
-        linux_timespec_t *ts = wali_get_mem(runtime, tmo_off, sizeof(linux_timespec_t));
+        linux_timespec_t *ts = wali_get_mem(exec_env, tmo_off, sizeof(linux_timespec_t));
         if (ts)
             timeout_ms = (int32_t)(ts->tv_sec * 1000 + ts->tv_nsec / 1000000);
     }
@@ -1815,116 +1585,91 @@ m3ApiRawFunction(wali_sys_ppoll)
 
         proc_entry_t *e = proc_get(proc->pid);
         if (e && e->killed)
-            m3ApiReturn(-L_EINTR);
+            return -L_EINTR;
     } while (1);
 
-    m3ApiReturn((int64_t)ready);
+    return (int64_t)ready;
 }
 
-/* ---- Phase 4: Time, identity, misc ---- */
-
-m3ApiRawFunction(wali_sys_clock_gettime)
+static int64_t wali_sys_clock_gettime(wasm_exec_env_t exec_env, int32_t clockid,
+                                       int32_t tp_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, clockid)
-    m3ApiGetArg(int32_t, tp_off)
-
-    linux_timespec_t *tp = wali_get_mem(runtime, tp_off, sizeof(linux_timespec_t));
+    (void)clockid;
+    linux_timespec_t *tp = wali_get_mem(exec_env, tp_off, sizeof(linux_timespec_t));
     if (!tp)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     uint64_t ticks = pit_ticks;
-    if (clockid == L_CLOCK_MONOTONIC || clockid == L_CLOCK_REALTIME) {
-        tp->tv_sec = ticks / 1000;
-        tp->tv_nsec = (ticks % 1000) * 1000000;
-    } else {
-        tp->tv_sec = ticks / 1000;
-        tp->tv_nsec = (ticks % 1000) * 1000000;
-    }
-    m3ApiReturn(0);
+    tp->tv_sec = ticks / 1000;
+    tp->tv_nsec = (ticks % 1000) * 1000000;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_clock_getres)
+static int64_t wali_sys_clock_getres(wasm_exec_env_t exec_env, int32_t clockid,
+                                      int32_t res_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, clockid)
-    m3ApiGetArg(int32_t, res_off)
     (void)clockid;
-
     if (res_off) {
-        linux_timespec_t *res = wali_get_mem(runtime, res_off, sizeof(linux_timespec_t));
+        linux_timespec_t *res = wali_get_mem(exec_env, res_off, sizeof(linux_timespec_t));
         if (res) {
             res->tv_sec = 0;
             res->tv_nsec = 1000000;
         }
     }
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_clock_nanosleep)
+static int64_t wali_sys_clock_nanosleep(wasm_exec_env_t exec_env, int32_t clockid,
+                                         int32_t flags, int32_t request_off,
+                                         int32_t remain_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, clockid)
-    m3ApiGetArg(int32_t, flags)
-    m3ApiGetArg(int32_t, request_off)
-    m3ApiGetArg(int32_t, remain_off)
     (void)clockid; (void)flags; (void)remain_off;
-
-    linux_timespec_t *req = wali_get_mem(runtime, request_off, sizeof(linux_timespec_t));
+    linux_timespec_t *req = wali_get_mem(exec_env, request_off, sizeof(linux_timespec_t));
     if (!req)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     uint64_t ms = req->tv_sec * 1000 + req->tv_nsec / 1000000;
     uint64_t target = pit_ticks + ms;
     while (pit_ticks < target)
         scheduler_yield();
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_nanosleep)
+static int64_t wali_sys_nanosleep(wasm_exec_env_t exec_env, int32_t req_off,
+                                   int32_t rem_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, req_off)
-    m3ApiGetArg(int32_t, rem_off)
     (void)rem_off;
-
-    linux_timespec_t *req = wali_get_mem(runtime, req_off, sizeof(linux_timespec_t));
+    linux_timespec_t *req = wali_get_mem(exec_env, req_off, sizeof(linux_timespec_t));
     if (!req)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     uint64_t ms = req->tv_sec * 1000 + req->tv_nsec / 1000000;
     uint64_t target = pit_ticks + ms;
     while (pit_ticks < target)
         scheduler_yield();
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_gettimeofday)
+static int64_t wali_sys_gettimeofday(wasm_exec_env_t exec_env, int32_t tv_off,
+                                      int32_t tz_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, tv_off)
-    m3ApiGetArg(int32_t, tz_off)
     (void)tz_off;
-
     if (tv_off) {
-        linux_timeval_t *tv = wali_get_mem(runtime, tv_off, sizeof(linux_timeval_t));
+        linux_timeval_t *tv = wali_get_mem(exec_env, tv_off, sizeof(linux_timeval_t));
         if (tv) {
             uint64_t ticks = pit_ticks;
             tv->tv_sec = ticks / 1000;
             tv->tv_usec = (ticks % 1000) * 1000;
         }
     }
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_uname)
+static int64_t wali_sys_uname(wasm_exec_env_t exec_env, int32_t buf_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, buf_off)
-
-    linux_utsname_t *u = wali_get_mem(runtime, buf_off, sizeof(linux_utsname_t));
+    linux_utsname_t *u = wali_get_mem(exec_env, buf_off, sizeof(linux_utsname_t));
     if (!u)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     memset(u, 0, sizeof(linux_utsname_t));
     strncpy(u->sysname, "Linux", 64);
@@ -1932,40 +1677,32 @@ m3ApiRawFunction(wali_sys_uname)
     strncpy(u->release, "6.1.0-wali", 64);
     strncpy(u->version, BUILD_VERSION, 64);
     strncpy(u->machine, "x86_64", 64);
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getrandom)
+static int64_t wali_sys_getrandom(wasm_exec_env_t exec_env, int32_t buf_off,
+                                   uint32_t buflen, int32_t flags)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, buf_off)
-    m3ApiGetArg(uint32_t, buflen)
-    m3ApiGetArg(int32_t, flags)
     (void)flags;
-
-    uint8_t *buf = wali_get_mem(runtime, buf_off, buflen);
+    uint8_t *buf = wali_get_mem(exec_env, buf_off, buflen);
     if (!buf)
-        m3ApiReturn(-L_EFAULT);
+        return -L_EFAULT;
 
     uint64_t seed = pit_ticks;
     for (uint32_t i = 0; i < buflen; i++) {
         seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
         buf[i] = (uint8_t)(seed >> 33);
     }
-    m3ApiReturn((int64_t)buflen);
+    return (int64_t)buflen;
 }
 
-m3ApiRawFunction(wali_sys_prlimit64)
+static int64_t wali_sys_prlimit64(wasm_exec_env_t exec_env, int32_t pid,
+                                   int32_t resource, int32_t new_limit_off,
+                                   int32_t old_limit_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pid)
-    m3ApiGetArg(int32_t, resource)
-    m3ApiGetArg(int32_t, new_limit_off)
-    m3ApiGetArg(int32_t, old_limit_off)
     (void)pid; (void)new_limit_off;
-
     if (old_limit_off) {
-        linux_rlimit_t *rl = wali_get_mem(runtime, old_limit_off, sizeof(linux_rlimit_t));
+        linux_rlimit_t *rl = wali_get_mem(exec_env, old_limit_off, sizeof(linux_rlimit_t));
         if (rl) {
             switch (resource) {
             case L_RLIMIT_NOFILE:
@@ -1983,17 +1720,14 @@ m3ApiRawFunction(wali_sys_prlimit64)
             }
         }
     }
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_getrlimit)
+static int64_t wali_sys_getrlimit(wasm_exec_env_t exec_env, int32_t resource,
+                                   int32_t rlim_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, resource)
-    m3ApiGetArg(int32_t, rlim_off)
-
     if (rlim_off) {
-        linux_rlimit_t *rl = wali_get_mem(runtime, rlim_off, sizeof(linux_rlimit_t));
+        linux_rlimit_t *rl = wali_get_mem(exec_env, rlim_off, sizeof(linux_rlimit_t));
         if (rl) {
             switch (resource) {
             case L_RLIMIT_NOFILE:
@@ -2011,237 +1745,198 @@ m3ApiRawFunction(wali_sys_getrlimit)
             }
         }
     }
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_umask)
+static int64_t wali_sys_umask(wasm_exec_env_t exec_env, int32_t mask)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, mask)
-    wasm_process_t *proc = WALI_PROC(_ctx);
+    wasm_process_t *proc = WALI_PROC(exec_env);
     int64_t old = proc->umask;
     proc->umask = mask & 0777;
-    m3ApiReturn(old);
+    return old;
 }
 
-m3ApiRawFunction(wali_sys_flock)
+static int64_t wali_sys_flock(wasm_exec_env_t exec_env, int32_t fd, int32_t operation)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, operation)
-    (void)fd; (void)operation;
-    m3ApiReturn(0);
+    (void)exec_env; (void)fd; (void)operation;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_chmod)
+static int64_t wali_sys_chmod(wasm_exec_env_t exec_env, int32_t pathname_off, int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, mode)
-    (void)pathname_off; (void)mode;
-    m3ApiReturn(0);
+    (void)exec_env; (void)pathname_off; (void)mode;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_fchmod)
+static int64_t wali_sys_fchmod(wasm_exec_env_t exec_env, int32_t fd, int32_t mode)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, mode)
-    (void)fd; (void)mode;
-    m3ApiReturn(0);
+    (void)exec_env; (void)fd; (void)mode;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_kill)
+static int64_t wali_sys_kill(wasm_exec_env_t exec_env, int32_t pid, int32_t sig)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, pid)
-    m3ApiGetArg(int32_t, sig)
-    (void)sig;
-
+    (void)exec_env; (void)sig;
     proc_entry_t *e = proc_get(pid);
     if (!e)
-        m3ApiReturn(-L_ESRCH);
+        return -L_ESRCH;
     e->killed = true;
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_futex)
+static int64_t wali_sys_futex(wasm_exec_env_t exec_env, int32_t uaddr,
+                               int32_t futex_op, int32_t val, int32_t timeout,
+                               int32_t uaddr2, int32_t val3)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, uaddr)
-    m3ApiGetArg(int32_t, futex_op)
-    m3ApiGetArg(int32_t, val)
-    m3ApiGetArg(int32_t, timeout)
-    m3ApiGetArg(int32_t, uaddr2)
-    m3ApiGetArg(int32_t, val3)
-    (void)uaddr; (void)futex_op; (void)val;
+    (void)exec_env; (void)uaddr; (void)futex_op; (void)val;
     (void)timeout; (void)uaddr2; (void)val3;
-    m3ApiReturn(-L_ENOSYS);
+    return -L_ENOSYS;
 }
 
-m3ApiRawFunction(wali_sys_setuid)
+static int64_t wali_sys_setuid(wasm_exec_env_t exec_env, int32_t uid)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, uid)
-    (void)uid;
-    m3ApiReturn(0);
+    (void)exec_env; (void)uid;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_setgid)
+static int64_t wali_sys_setgid(wasm_exec_env_t exec_env, int32_t gid)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, gid)
-    (void)gid;
-    m3ApiReturn(0);
+    (void)exec_env; (void)gid;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_prctl)
+static int64_t wali_sys_prctl(wasm_exec_env_t exec_env, int32_t option,
+                               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, option)
-    m3ApiGetArg(uint64_t, arg2)
-    m3ApiGetArg(uint64_t, arg3)
-    m3ApiGetArg(uint64_t, arg4)
-    m3ApiGetArg(uint64_t, arg5)
-    (void)option; (void)arg2; (void)arg3; (void)arg4; (void)arg5;
-    m3ApiReturn(0);
+    (void)exec_env; (void)option; (void)arg2; (void)arg3; (void)arg4; (void)arg5;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_fadvise)
+static int64_t wali_sys_fadvise(wasm_exec_env_t exec_env, int32_t fd,
+                                 int64_t offset, int64_t len, int32_t advice)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int64_t, offset)
-    m3ApiGetArg(int64_t, len)
-    m3ApiGetArg(int32_t, advice)
-    (void)fd; (void)offset; (void)len; (void)advice;
-    m3ApiReturn(0);
+    (void)exec_env; (void)fd; (void)offset; (void)len; (void)advice;
+    return 0;
 }
 
-m3ApiRawFunction(wali_sys_statx)
+static int64_t wali_sys_statx(wasm_exec_env_t exec_env, int32_t dirfd,
+                               int32_t pathname_off, int32_t flags,
+                               uint32_t mask, int32_t statxbuf_off)
 {
-    m3ApiReturnType(int64_t)
-    m3ApiGetArg(int32_t, dirfd)
-    m3ApiGetArg(int32_t, pathname_off)
-    m3ApiGetArg(int32_t, flags)
-    m3ApiGetArg(uint32_t, mask)
-    m3ApiGetArg(int32_t, statxbuf_off)
-    (void)dirfd; (void)pathname_off; (void)flags; (void)mask; (void)statxbuf_off;
+    (void)exec_env; (void)dirfd; (void)pathname_off; (void)flags;
+    (void)mask; (void)statxbuf_off;
     wali_stub_log(SYS_STATX);
-    m3ApiReturn(-L_ENOSYS);
+    return -L_ENOSYS;
 }
 
-/* Default stub for any unlinked syscall */
-m3ApiRawFunction(wali_sys_stub)
+static int64_t wali_sys_stub(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int64_t)
+    (void)exec_env;
     wali_stub_log(-1);
-    m3ApiReturn(-L_ENOSYS);
+    return -L_ENOSYS;
 }
 
-/* ---- Link all WALI syscalls ---- */
-
-#define WALI_LINK(name, sig, func) \
-    m3_LinkRawFunctionEx(module, "wali", name, sig, func, proc)
-
-void wali_link_api(IM3Module module, IM3Runtime runtime, wasm_process_t *proc)
-{
-    (void)runtime;
-
+static NativeSymbol wali_symbols[] = {
     /* Aux functions */
-    WALI_LINK("__init",           "i()",   &wali_init);
-    WALI_LINK("__deinit",         "i()",   &wali_deinit);
-    WALI_LINK("__proc_exit",      "v(i)",  &wali_proc_exit);
-    WALI_LINK("__cl_get_argc",    "i()",   &wali_cl_get_argc);
-    WALI_LINK("__cl_get_argv_len","i(i)",  &wali_cl_get_argv_len);
-    WALI_LINK("__cl_copy_argv",   "i(*i)", &wali_cl_copy_argv);
-    WALI_LINK("__get_init_envfile","i(*i)", &wali_get_init_envfile);
-    WALI_LINK("sigsetjmp",        "i(ii)", &wali_sigsetjmp);
-    WALI_LINK("setjmp",           "i(i)",  &wali_setjmp);
-    WALI_LINK("longjmp",          "v(ii)", &wali_longjmp);
-    WALI_LINK("__wasm_thread_spawn","i(ii)",&wali_thread_spawn);
+    { "__init",             (void *)wali_init,              "()i",          NULL },
+    { "__deinit",           (void *)wali_deinit,            "()i",          NULL },
+    { "__proc_exit",        (void *)wali_proc_exit,         "(i)",          NULL },
+    { "__cl_get_argc",      (void *)wali_cl_get_argc,       "()i",          NULL },
+    { "__cl_get_argv_len",  (void *)wali_cl_get_argv_len,   "(i)i",         NULL },
+    { "__cl_copy_argv",     (void *)wali_cl_copy_argv,      "(*i)i",        NULL },
+    { "__get_init_envfile", (void *)wali_get_init_envfile,   "(*i)i",        NULL },
+    { "sigsetjmp",          (void *)wali_sigsetjmp,         "(ii)i",        NULL },
+    { "setjmp",             (void *)wali_setjmp,            "(i)i",         NULL },
+    { "longjmp",            (void *)wali_longjmp,           "(ii)",         NULL },
+    { "__wasm_thread_spawn",(void *)wali_thread_spawn,      "(ii)i",        NULL },
 
-    /* Syscalls - all return I (int64) */
-    WALI_LINK("SYS_read",           "I(iii)",    &wali_sys_read);
-    WALI_LINK("SYS_write",          "I(iii)",    &wali_sys_write);
-    WALI_LINK("SYS_open",           "I(iii)",    &wali_sys_open);
-    WALI_LINK("SYS_close",          "I(i)",      &wali_sys_close);
-    WALI_LINK("SYS_stat",           "I(ii)",     &wali_sys_stat);
-    WALI_LINK("SYS_fstat",          "I(ii)",     &wali_sys_fstat);
-    WALI_LINK("SYS_lstat",          "I(ii)",     &wali_sys_lstat);
-    WALI_LINK("SYS_poll",           "I(iIi)",    &wali_sys_poll);
-    WALI_LINK("SYS_lseek",          "I(iIi)",    &wali_sys_lseek);
-    WALI_LINK("SYS_mmap",           "I(iiiiiI)", &wali_sys_mmap);
-    WALI_LINK("SYS_mprotect",       "I(iii)",    &wali_sys_mprotect);
-    WALI_LINK("SYS_munmap",         "I(ii)",     &wali_sys_munmap);
-    WALI_LINK("SYS_brk",            "I(i)",      &wali_sys_brk);
-    WALI_LINK("SYS_rt_sigaction",   "I(iiii)",   &wali_sys_rt_sigaction);
-    WALI_LINK("SYS_rt_sigprocmask", "I(iiii)",   &wali_sys_rt_sigprocmask);
-    WALI_LINK("SYS_ioctl",          "I(iii)",    &wali_sys_ioctl);
-    WALI_LINK("SYS_pread64",        "I(iiiI)",   &wali_sys_pread64);
-    WALI_LINK("SYS_pwrite64",       "I(iiiI)",   &wali_sys_pwrite64);
-    WALI_LINK("SYS_readv",          "I(iii)",    &wali_sys_readv);
-    WALI_LINK("SYS_writev",         "I(iii)",    &wali_sys_writev);
-    WALI_LINK("SYS_access",         "I(ii)",     &wali_sys_access);
-    WALI_LINK("SYS_pipe",           "I(i)",      &wali_sys_pipe);
-    WALI_LINK("SYS_sched_yield",    "I()",       &wali_sys_sched_yield);
-    WALI_LINK("SYS_madvise",        "I(iii)",    &wali_sys_madvise);
-    WALI_LINK("SYS_dup",            "I(i)",      &wali_sys_dup);
-    WALI_LINK("SYS_dup2",           "I(ii)",     &wali_sys_dup2);
-    WALI_LINK("SYS_nanosleep",      "I(ii)",     &wali_sys_nanosleep);
-    WALI_LINK("SYS_getpid",         "I()",       &wali_sys_getpid);
-    WALI_LINK("SYS_exit",           "I(i)",      &wali_sys_exit);
-    WALI_LINK("SYS_kill",           "I(ii)",     &wali_sys_kill);
-    WALI_LINK("SYS_uname",          "I(i)",      &wali_sys_uname);
-    WALI_LINK("SYS_fcntl",          "I(iiI)",    &wali_sys_fcntl);
-    WALI_LINK("SYS_flock",          "I(ii)",     &wali_sys_flock);
-    WALI_LINK("SYS_fsync",          "I(i)",      &wali_sys_fsync);
-    WALI_LINK("SYS_fdatasync",      "I(i)",      &wali_sys_fsync);
-    WALI_LINK("SYS_ftruncate",      "I(iI)",     &wali_sys_ftruncate);
-    WALI_LINK("SYS_getcwd",         "I(ii)",     &wali_sys_getcwd);
-    WALI_LINK("SYS_chdir",          "I(i)",      &wali_sys_chdir);
-    WALI_LINK("SYS_rename",         "I(ii)",     &wali_sys_rename);
-    WALI_LINK("SYS_mkdir",          "I(ii)",     &wali_sys_mkdir);
-    WALI_LINK("SYS_rmdir",          "I(i)",      &wali_sys_rmdir);
-    WALI_LINK("SYS_unlink",         "I(i)",      &wali_sys_unlink);
-    WALI_LINK("SYS_readlink",       "I(iii)",    &wali_sys_readlink);
-    WALI_LINK("SYS_chmod",          "I(ii)",     &wali_sys_chmod);
-    WALI_LINK("SYS_fchmod",         "I(ii)",     &wali_sys_fchmod);
-    WALI_LINK("SYS_umask",          "I(i)",      &wali_sys_umask);
-    WALI_LINK("SYS_gettimeofday",   "I(ii)",     &wali_sys_gettimeofday);
-    WALI_LINK("SYS_getrlimit",      "I(ii)",     &wali_sys_getrlimit);
-    WALI_LINK("SYS_getuid",         "I()",       &wali_sys_getuid);
-    WALI_LINK("SYS_getgid",         "I()",       &wali_sys_getgid);
-    WALI_LINK("SYS_setuid",         "I(i)",      &wali_sys_setuid);
-    WALI_LINK("SYS_setgid",         "I(i)",      &wali_sys_setgid);
-    WALI_LINK("SYS_geteuid",        "I()",       &wali_sys_geteuid);
-    WALI_LINK("SYS_getegid",        "I()",       &wali_sys_getegid);
-    WALI_LINK("SYS_setpgid",        "I(ii)",     &wali_sys_setpgid);
-    WALI_LINK("SYS_getppid",        "I()",       &wali_sys_getppid);
-    WALI_LINK("SYS_setsid",         "I()",       &wali_sys_setsid);
-    WALI_LINK("SYS_getpgid",        "I(i)",      &wali_sys_getpgid);
-    WALI_LINK("SYS_sigaltstack",    "I(ii)",     &wali_sys_sigaltstack);
-    WALI_LINK("SYS_prctl",          "I(iIIII)",  &wali_sys_prctl);
-    WALI_LINK("SYS_gettid",         "I()",       &wali_sys_gettid);
-    WALI_LINK("SYS_futex",          "I(iiiiii)", &wali_sys_futex);
-    WALI_LINK("SYS_getdents64",     "I(iii)",    &wali_sys_getdents64);
-    WALI_LINK("SYS_set_tid_address","I(i)",      &wali_sys_set_tid_address);
-    WALI_LINK("SYS_fadvise",        "I(iIIi)",   &wali_sys_fadvise);
-    WALI_LINK("SYS_clock_gettime",  "I(ii)",     &wali_sys_clock_gettime);
-    WALI_LINK("SYS_clock_getres",   "I(ii)",     &wali_sys_clock_getres);
-    WALI_LINK("SYS_clock_nanosleep","I(iiii)",   &wali_sys_clock_nanosleep);
-    WALI_LINK("SYS_exit_group",     "I(i)",      &wali_sys_exit_group);
-    WALI_LINK("SYS_openat",         "I(iiii)",   &wali_sys_openat);
-    WALI_LINK("SYS_mkdirat",        "I(iii)",    &wali_sys_mkdirat);
-    WALI_LINK("SYS_newfstatat",     "I(iiii)",   &wali_sys_newfstatat);
-    WALI_LINK("SYS_unlinkat",       "I(iii)",    &wali_sys_unlinkat);
-    WALI_LINK("SYS_renameat2",      "I(iiiii)",  &wali_sys_renameat2);
-    WALI_LINK("SYS_faccessat",      "I(iiii)",   &wali_sys_faccessat);
-    WALI_LINK("SYS_faccessat2",     "I(iiii)",   &wali_sys_faccessat);
-    WALI_LINK("SYS_dup3",           "I(iii)",    &wali_sys_dup3);
-    WALI_LINK("SYS_pipe2",          "I(ii)",     &wali_sys_pipe2);
-    WALI_LINK("SYS_prlimit64",      "I(iiii)",   &wali_sys_prlimit64);
-    WALI_LINK("SYS_ppoll",          "I(iIiii)",  &wali_sys_ppoll);
-    WALI_LINK("SYS_getrandom",      "I(iii)",    &wali_sys_getrandom);
-    WALI_LINK("SYS_statx",          "I(iiiii)",  &wali_sys_statx);
+    /* Syscalls */
+    { "SYS_read",           (void *)wali_sys_read,          "(iii)I",       NULL },
+    { "SYS_write",          (void *)wali_sys_write,         "(iii)I",       NULL },
+    { "SYS_open",           (void *)wali_sys_open,          "(iii)I",       NULL },
+    { "SYS_close",          (void *)wali_sys_close,         "(i)I",         NULL },
+    { "SYS_stat",           (void *)wali_sys_stat,          "(ii)I",        NULL },
+    { "SYS_fstat",          (void *)wali_sys_fstat,         "(ii)I",        NULL },
+    { "SYS_lstat",          (void *)wali_sys_lstat,         "(ii)I",        NULL },
+    { "SYS_poll",           (void *)wali_sys_poll,          "(iIi)I",       NULL },
+    { "SYS_lseek",          (void *)wali_sys_lseek,         "(iIi)I",       NULL },
+    { "SYS_mmap",           (void *)wali_sys_mmap,          "(iiiiiI)I",    NULL },
+    { "SYS_mprotect",       (void *)wali_sys_mprotect,      "(iii)I",       NULL },
+    { "SYS_munmap",         (void *)wali_sys_munmap,        "(ii)I",        NULL },
+    { "SYS_brk",            (void *)wali_sys_brk,           "(i)I",         NULL },
+    { "SYS_rt_sigaction",   (void *)wali_sys_rt_sigaction,  "(iiii)I",      NULL },
+    { "SYS_rt_sigprocmask", (void *)wali_sys_rt_sigprocmask,"(iiii)I",     NULL },
+    { "SYS_ioctl",          (void *)wali_sys_ioctl,         "(iii)I",       NULL },
+    { "SYS_pread64",        (void *)wali_sys_pread64,       "(iiiI)I",      NULL },
+    { "SYS_pwrite64",       (void *)wali_sys_pwrite64,      "(iiiI)I",      NULL },
+    { "SYS_readv",          (void *)wali_sys_readv,         "(iii)I",       NULL },
+    { "SYS_writev",         (void *)wali_sys_writev,        "(iii)I",       NULL },
+    { "SYS_access",         (void *)wali_sys_access,        "(ii)I",        NULL },
+    { "SYS_pipe",           (void *)wali_sys_pipe,          "(i)I",         NULL },
+    { "SYS_sched_yield",    (void *)wali_sys_sched_yield,   "()I",          NULL },
+    { "SYS_madvise",        (void *)wali_sys_madvise,       "(iii)I",       NULL },
+    { "SYS_dup",            (void *)wali_sys_dup,           "(i)I",         NULL },
+    { "SYS_dup2",           (void *)wali_sys_dup2,          "(ii)I",        NULL },
+    { "SYS_nanosleep",      (void *)wali_sys_nanosleep,     "(ii)I",        NULL },
+    { "SYS_getpid",         (void *)wali_sys_getpid,        "()I",          NULL },
+    { "SYS_exit",           (void *)wali_sys_exit,          "(i)I",         NULL },
+    { "SYS_kill",           (void *)wali_sys_kill,          "(ii)I",        NULL },
+    { "SYS_uname",          (void *)wali_sys_uname,         "(i)I",         NULL },
+    { "SYS_fcntl",          (void *)wali_sys_fcntl,         "(iiI)I",       NULL },
+    { "SYS_flock",          (void *)wali_sys_flock,         "(ii)I",        NULL },
+    { "SYS_fsync",          (void *)wali_sys_fsync,         "(i)I",         NULL },
+    { "SYS_fdatasync",      (void *)wali_sys_fsync,         "(i)I",         NULL },
+    { "SYS_ftruncate",      (void *)wali_sys_ftruncate,     "(iI)I",        NULL },
+    { "SYS_getcwd",         (void *)wali_sys_getcwd,        "(ii)I",        NULL },
+    { "SYS_chdir",          (void *)wali_sys_chdir,         "(i)I",         NULL },
+    { "SYS_rename",         (void *)wali_sys_rename,        "(ii)I",        NULL },
+    { "SYS_mkdir",          (void *)wali_sys_mkdir,         "(ii)I",        NULL },
+    { "SYS_rmdir",          (void *)wali_sys_rmdir,         "(i)I",         NULL },
+    { "SYS_unlink",         (void *)wali_sys_unlink,        "(i)I",         NULL },
+    { "SYS_readlink",       (void *)wali_sys_readlink,      "(iii)I",       NULL },
+    { "SYS_chmod",          (void *)wali_sys_chmod,         "(ii)I",        NULL },
+    { "SYS_fchmod",         (void *)wali_sys_fchmod,        "(ii)I",        NULL },
+    { "SYS_umask",          (void *)wali_sys_umask,         "(i)I",         NULL },
+    { "SYS_gettimeofday",   (void *)wali_sys_gettimeofday,  "(ii)I",        NULL },
+    { "SYS_getrlimit",      (void *)wali_sys_getrlimit,     "(ii)I",        NULL },
+    { "SYS_getuid",         (void *)wali_sys_getuid,        "()I",          NULL },
+    { "SYS_getgid",         (void *)wali_sys_getgid,        "()I",          NULL },
+    { "SYS_setuid",         (void *)wali_sys_setuid,        "(i)I",         NULL },
+    { "SYS_setgid",         (void *)wali_sys_setgid,        "(i)I",         NULL },
+    { "SYS_geteuid",        (void *)wali_sys_geteuid,       "()I",          NULL },
+    { "SYS_getegid",        (void *)wali_sys_getegid,       "()I",          NULL },
+    { "SYS_setpgid",        (void *)wali_sys_setpgid,       "(ii)I",        NULL },
+    { "SYS_getppid",        (void *)wali_sys_getppid,       "()I",          NULL },
+    { "SYS_setsid",         (void *)wali_sys_setsid,        "()I",          NULL },
+    { "SYS_getpgid",        (void *)wali_sys_getpgid,       "(i)I",         NULL },
+    { "SYS_sigaltstack",    (void *)wali_sys_sigaltstack,   "(ii)I",        NULL },
+    { "SYS_prctl",          (void *)wali_sys_prctl,         "(iIIII)I",     NULL },
+    { "SYS_gettid",         (void *)wali_sys_gettid,        "()I",          NULL },
+    { "SYS_futex",          (void *)wali_sys_futex,         "(iiiiii)I",    NULL },
+    { "SYS_getdents64",     (void *)wali_sys_getdents64,    "(iii)I",       NULL },
+    { "SYS_set_tid_address",(void *)wali_sys_set_tid_address,"(i)I",        NULL },
+    { "SYS_fadvise",        (void *)wali_sys_fadvise,       "(iIIi)I",      NULL },
+    { "SYS_clock_gettime",  (void *)wali_sys_clock_gettime, "(ii)I",        NULL },
+    { "SYS_clock_getres",   (void *)wali_sys_clock_getres,  "(ii)I",        NULL },
+    { "SYS_clock_nanosleep",(void *)wali_sys_clock_nanosleep,"(iiii)I",     NULL },
+    { "SYS_exit_group",     (void *)wali_sys_exit_group,    "(i)I",         NULL },
+    { "SYS_openat",         (void *)wali_sys_openat,        "(iiii)I",      NULL },
+    { "SYS_mkdirat",        (void *)wali_sys_mkdirat,       "(iii)I",       NULL },
+    { "SYS_newfstatat",     (void *)wali_sys_newfstatat,    "(iiii)I",      NULL },
+    { "SYS_unlinkat",       (void *)wali_sys_unlinkat,      "(iii)I",       NULL },
+    { "SYS_renameat2",      (void *)wali_sys_renameat2,     "(iiiii)I",     NULL },
+    { "SYS_faccessat",      (void *)wali_sys_faccessat,     "(iiii)I",      NULL },
+    { "SYS_faccessat2",     (void *)wali_sys_faccessat,     "(iiii)I",      NULL },
+    { "SYS_dup3",           (void *)wali_sys_dup3,          "(iii)I",       NULL },
+    { "SYS_pipe2",          (void *)wali_sys_pipe2,         "(ii)I",        NULL },
+    { "SYS_prlimit64",      (void *)wali_sys_prlimit64,     "(iiii)I",      NULL },
+    { "SYS_ppoll",          (void *)wali_sys_ppoll,         "(iIiii)I",     NULL },
+    { "SYS_getrandom",      (void *)wali_sys_getrandom,     "(iii)I",       NULL },
+    { "SYS_statx",          (void *)wali_sys_statx,         "(iiiii)I",     NULL },
+};
+
+void wasm_register_wali_natives(void)
+{
+    wasm_runtime_register_natives("wali", wali_symbols,
+                                  sizeof(wali_symbols) / sizeof(NativeSymbol));
 }

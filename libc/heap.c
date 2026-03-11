@@ -25,6 +25,7 @@ void heap_init()
 
 void *malloc(size_t size)
 {
+    size = (size + 7) & ~(size_t)7;
     block_t *curr = heap_start;
 
     while (curr) {

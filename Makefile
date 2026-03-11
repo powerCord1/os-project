@@ -50,10 +50,6 @@ CFLAGS = -std=gnu99 \
 		 -DBUILD_TIME="\"$(BUILD_TIME)\"" \
 		 -DCOMMIT="\"$(COMMIT)\"" \
 		 -I$(INCLUDEDIR) \
-		 -Iwasm3/source \
-		 -Dd_m3LogTimestamps=0 \
-		 -Dd_m3MaxFunctionStackHeight=500 \
-		 -Dd_m3MaxLinearMemoryPages=1024 \
 		 -fno-stack-protector \
 		 -fno-stack-check \
 		 -fno-PIC \
@@ -111,13 +107,64 @@ WASM_SRCDIR = userspace
 WASM_SOURCES = $(wildcard $(WASM_SRCDIR)/*.c)
 WASM_BINARIES = $(patsubst $(WASM_SRCDIR)/%.c,$(BUILDDIR)/wasm/%.wm,$(WASM_SOURCES))
 
+# WAMR (WebAssembly Micro Runtime) configuration
+WAMR_DIR = ./wasm-micro-runtime
+WAMR_CORE = $(WAMR_DIR)/core
+
+WAMR_CFLAGS = -I$(WAMR_CORE)/iwasm/include \
+              -I$(WAMR_CORE)/iwasm/interpreter \
+              -I$(WAMR_CORE)/iwasm/common \
+              -I$(WAMR_CORE)/shared/utils \
+              -I$(WAMR_CORE)/shared/mem-alloc \
+              -I$(WAMR_CORE)/shared/platform/include \
+              -Idrivers/wasm/platform \
+              -DWASM_ENABLE_INTERP=1 \
+              -DWASM_ENABLE_AOT=0 \
+              -DWASM_ENABLE_LIBC_BUILTIN=0 \
+              -DWASM_ENABLE_LIBC_WASI=0 \
+              -DWASM_ENABLE_BULK_MEMORY=1 \
+              -DWASM_ENABLE_SHARED_MEMORY=0 \
+              -DWASM_ENABLE_THREAD_MGR=0 \
+              -DWASM_ENABLE_MINI_LOADER=0 \
+              -DBH_PLATFORM_MYOS \
+              -DBH_MALLOC=wasm_runtime_malloc \
+              -DBH_FREE=wasm_runtime_free \
+              -DWASM_ENABLE_BULK_MEMORY_OPT=1
+
+WAMR_C_SOURCES = \
+    $(WAMR_CORE)/iwasm/interpreter/wasm_interp_classic.c \
+    $(WAMR_CORE)/iwasm/interpreter/wasm_loader.c \
+    $(WAMR_CORE)/iwasm/interpreter/wasm_runtime.c \
+    $(WAMR_CORE)/iwasm/common/wasm_runtime_common.c \
+    $(WAMR_CORE)/iwasm/common/wasm_native.c \
+    $(WAMR_CORE)/iwasm/common/wasm_exec_env.c \
+    $(WAMR_CORE)/iwasm/common/wasm_memory.c \
+    $(WAMR_CORE)/iwasm/common/wasm_loader_common.c \
+    $(WAMR_CORE)/iwasm/common/wasm_application.c \
+    $(WAMR_CORE)/shared/utils/bh_assert.c \
+    $(WAMR_CORE)/shared/utils/bh_common.c \
+    $(WAMR_CORE)/shared/utils/bh_hashmap.c \
+    $(WAMR_CORE)/shared/utils/bh_leb128.c \
+    $(WAMR_CORE)/shared/utils/bh_list.c \
+    $(WAMR_CORE)/shared/utils/bh_log.c \
+    $(WAMR_CORE)/shared/utils/bh_vector.c \
+    $(WAMR_CORE)/shared/utils/bh_bitmap.c \
+    $(WAMR_CORE)/shared/utils/bh_queue.c \
+    $(WAMR_CORE)/shared/mem-alloc/mem_alloc.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_alloc.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_hmu.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_kfc.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_gc.c \
+    ./drivers/wasm/platform/myos_platform.c \
+    ./drivers/wasm/platform/myos_thread.c \
+    ./drivers/wasm/platform/myos_time.c
+
+CFLAGS += $(WAMR_CFLAGS)
+
 # Find source files
-WASM3_C_SOURCES = ./wasm3/source/m3_bind.c ./wasm3/source/m3_code.c ./wasm3/source/m3_compile.c \
-                  ./wasm3/source/m3_core.c ./wasm3/source/m3_env.c ./wasm3/source/m3_exec.c \
-                  ./wasm3/source/m3_function.c ./wasm3/source/m3_info.c ./wasm3/source/m3_module.c \
-                  ./wasm3/source/m3_parse.c
-C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*' -not -path './userspace/*' -not -path './wasm3/*') $(WASM3_C_SOURCES)
-ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*')
+C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*' -not -path './userspace/*' -not -path './wasm3/*' -not -path './wasm-micro-runtime/*' -not -path './drivers/wasm/platform/*') $(WAMR_C_SOURCES)
+ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*' -not -path './wasm-micro-runtime/*') \
+    $(WAMR_CORE)/iwasm/common/arch/invokeNative_em64.s
 DATA_SOURCES = $(wildcard data/*)
 RESOURCE_C_SOURCES = $(patsubst data/%,data/%.c,$(filter-out %.c,$(DATA_SOURCES)))
 C_SOURCES = $(C_SOURCES_REGULAR) $(RESOURCE_C_SOURCES)

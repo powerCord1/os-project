@@ -16,6 +16,7 @@ int strcasecmp(const char *s1, const char *s2);
 char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 char *strtok(char *str, const char *delim);
+char *strtok_r(char *str, const char *delim, char **saveptr);
 size_t strspn(const char *str, const char *accept);
 char *strpbrk(const char *str, const char *accept);
 
@@ -31,6 +32,17 @@ int strncmp(const char *s1, const char *s2, size_t n);
 unsigned long strtoul(const char *nptr, char **endptr, int base);
 unsigned long long strtoull(const char *nptr, char **endptr, int base);
 double strtod(const char *nptr, char **endptr);
+float strtof(const char *nptr, char **endptr);
+
+char *strstr(const char *haystack, const char *needle);
+
+long strtol(const char *nptr, char **endptr, int base);
+
+void qsort(void *base, size_t nmemb, size_t size,
+            int (*compar)(const void *, const void *));
+
+void *bsearch(const void *key, const void *base, size_t nmemb, size_t size,
+              int (*compar)(const void *, const void *));
 
 char *itohexa(char *dest, unsigned x);
 char *itoa(char *dest, int n);

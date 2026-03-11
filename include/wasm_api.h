@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "wasm3.h"
+#include "wasm_export.h"
 
 #define WASM_MAX_FDS 64
 #define WASM_MAX_ARGC 16
@@ -64,5 +64,5 @@ typedef struct wasm_process {
 
 wasm_process_t *wasm_process_create(int argc, char **argv);
 void wasm_process_destroy(wasm_process_t *proc);
-void wasm_link_api(IM3Module module, wasm_process_t *proc);
-void wali_link_api(IM3Module module, IM3Runtime runtime, wasm_process_t *proc);
+void wasm_register_env_natives(void);
+void wasm_register_wali_natives(void);

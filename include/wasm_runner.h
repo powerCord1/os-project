@@ -20,6 +20,7 @@ typedef struct {
     char path[64];
 } fd_setup_entry_t;
 
+void wasm_runtime_setup(void);
 int wasm_run_file(const char *path, int argc, char **argv);
 int32_t wasm_spawn(const char *path, int argc, char **argv, int32_t parent_pid);
 int32_t wasm_spawn_redirected(const char *path, int argc, char **argv,

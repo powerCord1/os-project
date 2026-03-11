@@ -11,9 +11,6 @@
 #include <wasm_api.h>
 #include <wasm_runner.h>
 
-#include "wasm3.h"
-#include "m3_env.h"
-
 typedef struct {
     char path[256];
     int argc;
@@ -100,6 +97,24 @@ static void apply_fd_setup(wasm_process_t *proc, fd_setup_entry_t *setups, int c
     }
 }
 
+void wasm_runtime_setup(void)
+{
+    RuntimeInitArgs args;
+    memset(&args, 0, sizeof(args));
+    args.mem_alloc_type = Alloc_With_Allocator;
+    args.mem_alloc_option.allocator.malloc_func = (void *)malloc;
+    args.mem_alloc_option.allocator.realloc_func = (void *)realloc;
+    args.mem_alloc_option.allocator.free_func = (void *)free;
+
+    if (!wasm_runtime_full_init(&args)) {
+        printf("WAMR init failed\n");
+        return;
+    }
+
+    wasm_register_env_natives();
+    wasm_register_wali_natives();
+}
+
 static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
                            fd_setup_entry_t *fd_setups, int fd_setup_count)
 {
@@ -133,46 +148,48 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
     if (entry)
         entry->wasm_proc = proc;
 
-    IM3Environment env = m3_NewEnvironment();
-    IM3Runtime runtime = m3_NewRuntime(env, 32768, NULL);
-    IM3Module module = NULL;
-
-    M3Result result = m3_ParseModule(env, &module, wasm_bytes, size);
-    if (result) {
-        printf("Parse error: %s\n", result);
-        m3_FreeRuntime(runtime);
-        m3_FreeEnvironment(env);
+    char err[128];
+    wasm_module_t module = wasm_runtime_load(wasm_bytes, size, err, sizeof(err));
+    if (!module) {
+        printf("Load error: %s\n", err);
         free(wasm_bytes);
         wasm_process_destroy(proc);
         return -1;
     }
 
-    result = m3_LoadModule(runtime, module);
-    if (result) {
-        printf("Load error: %s\n", result);
-        m3_FreeModule(module);
-        m3_FreeRuntime(runtime);
-        m3_FreeEnvironment(env);
+    wasm_module_inst_t inst = wasm_runtime_instantiate(module, 32768, 65536, err, sizeof(err));
+    if (!inst) {
+        printf("Instantiate error: %s\n", err);
+        wasm_runtime_unload(module);
         free(wasm_bytes);
         wasm_process_destroy(proc);
         return -1;
     }
 
-    wasm_link_api(module, proc);
-    wali_link_api(module, runtime, proc);
+    wasm_exec_env_t exec_env = wasm_runtime_create_exec_env(inst, 32768);
+    if (!exec_env) {
+        printf("Failed to create exec env\n");
+        wasm_runtime_deinstantiate(inst);
+        wasm_runtime_unload(module);
+        free(wasm_bytes);
+        wasm_process_destroy(proc);
+        return -1;
+    }
+
+    wasm_runtime_set_user_data(exec_env, proc);
 
     if (fd_setups && fd_setup_count > 0)
         apply_fd_setup(proc, fd_setups, fd_setup_count);
 
-    IM3Function func;
-    result = m3_FindFunction(&func, runtime, "_start");
-    if (result)
-        result = m3_FindFunction(&func, runtime, "main");
+    wasm_function_inst_t func = wasm_runtime_lookup_function(inst, "_start");
+    if (!func)
+        func = wasm_runtime_lookup_function(inst, "main");
 
-    if (result) {
-        printf("No _start or main: %s\n", result);
-        m3_FreeRuntime(runtime);
-        m3_FreeEnvironment(env);
+    if (!func) {
+        printf("No _start or main found\n");
+        wasm_runtime_destroy_exec_env(exec_env);
+        wasm_runtime_deinstantiate(inst);
+        wasm_runtime_unload(module);
         free(wasm_bytes);
         wasm_process_destroy(proc);
         return -1;
@@ -188,7 +205,8 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
             did_attach_kbd = true;
         }
     }
-    result = m3_Call(func, 0, NULL);
+
+    bool ok = wasm_runtime_call_wasm(exec_env, func, 0, NULL);
 
     if (proc->fds[0].type == FD_CONSOLE && did_attach_kbd) {
         tty_detach_keyboard(tty_get(proc->tty_id));
@@ -196,22 +214,20 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
     }
 
     int ret = 0;
-    if (result) {
-        if (result == m3Err_trapExit) {
+    if (!ok) {
+        const char *exc = wasm_runtime_get_exception(inst);
+        if (exc && strstr(exc, "wali exit")) {
             ret = proc->exit_code;
         } else {
-            M3ErrorInfo info;
-            m3_GetErrorInfo(runtime, &info);
-            printf("Trap: %s", result);
-            if (info.message)
-                printf(" (%s)", info.message);
-            printf("\n");
+            printf("Trap: %s\n", exc ? exc : "unknown");
             ret = -1;
         }
+        wasm_runtime_clear_exception(inst);
     }
 
-    m3_FreeRuntime(runtime);
-    m3_FreeEnvironment(env);
+    wasm_runtime_destroy_exec_env(exec_env);
+    wasm_runtime_deinstantiate(inst);
+    wasm_runtime_unload(module);
     free(wasm_bytes);
     wasm_process_destroy(proc);
     return ret;
