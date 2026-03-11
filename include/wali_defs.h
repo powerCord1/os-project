@@ -25,15 +25,24 @@
 #define SYS_WRITEV           20
 #define SYS_ACCESS           21
 #define SYS_PIPE             22
+#define SYS_SELECT           23
 #define SYS_SCHED_YIELD      24
 #define SYS_MADVISE          28
 #define SYS_DUP              32
 #define SYS_DUP2             33
 #define SYS_NANOSLEEP        35
+#define SYS_SETITIMER        38
 #define SYS_GETPID           39
 #define SYS_SOCKET           41
 #define SYS_CONNECT          42
+#define SYS_SENDTO           44
 #define SYS_SENDMSG          46
+#define SYS_RECVMSG          47
+#define SYS_BIND             49
+#define SYS_GETSOCKNAME      51
+#define SYS_SETSOCKOPT       54
+#define SYS_GETSOCKOPT       55
+#define SYS_FORK             57
 #define SYS_EXIT             60
 #define SYS_KILL             62
 #define SYS_UNAME            63
@@ -69,10 +78,15 @@
 #define SYS_GETPPID         110
 #define SYS_SETSID          112
 #define SYS_GETPGID         121
+#define SYS_RT_SIGPENDING   127
 #define SYS_SIGALTSTACK     131
 #define SYS_SCHED_SETSCHEDULER 144
 #define SYS_PRCTL           157
+#define SYS_SYNC            162
 #define SYS_GETTID          186
+#define SYS_SETXATTR        188
+#define SYS_GETXATTR        191
+#define SYS_LISTXATTR       194
 #define SYS_FUTEX           202
 #define SYS_SCHED_GETAFFINITY 204
 #define SYS_GETDENTS64      217
@@ -133,6 +147,8 @@
 #define L_ELOOP         40
 #define L_ENAMETOOLONG  36
 #define L_ESPIPE        29
+#define L_EAFNOSUPPORT  97
+#define L_ENOTSUP       95
 
 /* Linux open flags */
 #define L_O_RDONLY     0x0000
@@ -217,7 +233,14 @@
 #define L_MAP_PRIVATE   0x02
 
 /* signal constants */
-#define L_NSIG 64
+#define L_NSIG          64
+#define L_SIGALRM       14
+#define L_SIG_DFL        0
+#define L_SIG_IGN        1
+#define L_SIG_BLOCK      0
+#define L_SIG_UNBLOCK    1
+#define L_SIG_SETMASK    2
+#define L_ITIMER_REAL    0
 
 /*
  * Linux x86-64 struct stat layout (144 bytes)
@@ -298,6 +321,12 @@ typedef struct {
     int64_t tv_sec;
     int64_t tv_usec;
 } linux_timeval_t;
+
+/* struct itimerval */
+typedef struct {
+    linux_timeval_t it_interval;
+    linux_timeval_t it_value;
+} linux_itimerval_t;
 
 /* struct utsname (6 x 65 bytes) */
 typedef struct {

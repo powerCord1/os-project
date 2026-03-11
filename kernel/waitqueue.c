@@ -13,6 +13,7 @@ void waitqueue_sleep(waitqueue_t *wq)
     disable_interrupts();
 
     wq_node_t *node = malloc(sizeof(wq_node_t));
+    // FATAL: This causes a page fault after a few minutes since boot, at least when running wasm processes, Address is 0x0
     node->thread_id = scheduler_get_current_id();
     node->next = NULL;
 

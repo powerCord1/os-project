@@ -4,6 +4,7 @@
 
 #include <font.h>
 #include <framebuffer.h>
+#include <heap.h>
 #include <limine.h>
 #include <keyboard.h>
 #include <stdio.h>
@@ -23,30 +24,142 @@ static const uint32_t ansi_bright[8] = {
     0x5555FF, 0xFF55FF, 0x55FFFF, 0xFFFFFF,
 };
 
+static inline tty_cell_t *tty_cell_at(tty_t *tty, uint32_t row, uint32_t col)
+{
+    return &tty->cells[row * tty->cols + col];
+}
+
+static void tty_clear_cell(tty_t *tty, uint32_t row, uint32_t col)
+{
+    tty_cell_t *cell = tty_cell_at(tty, row, col);
+    cell->c = ' ';
+    cell->fg = 0xFFFFFF;
+    cell->bg = 0x000000;
+    cell->bold = false;
+    cell->reverse = false;
+}
+
+static void tty_render_cell(tty_t *tty, uint32_t row, uint32_t col)
+{
+    tty_cell_t *cell = tty_cell_at(tty, row, col);
+    uint32_t cell_fg = cell->reverse ? cell->bg : cell->fg;
+    uint32_t cell_bg = cell->reverse ? cell->fg : cell->bg;
+    uint32_t saved_fg = fb_get_fg();
+    uint32_t saved_bg = fb_get_bg();
+    fb_set_color(cell_fg, cell_bg);
+    fb_putchar_at(cell->c, col * char_width, row * char_height);
+    fb_set_color(saved_fg, saved_bg);
+}
+
+static void tty_render_cell_inverted(tty_t *tty, uint32_t row, uint32_t col)
+{
+    tty_cell_t *cell = tty_cell_at(tty, row, col);
+    uint32_t cell_fg = cell->reverse ? cell->bg : cell->fg;
+    uint32_t cell_bg = cell->reverse ? cell->fg : cell->bg;
+    uint32_t saved_fg = fb_get_fg();
+    uint32_t saved_bg = fb_get_bg();
+    fb_set_color(cell_bg, cell_fg);
+    fb_putchar_at(cell->c, col * char_width, row * char_height);
+    fb_set_color(saved_fg, saved_bg);
+}
+
 static void tty_sync_cursor(tty_t *tty)
 {
-    fb_set_cursor(tty->cursor_col * char_width, tty->cursor_row * char_height);
+    if (tty->prev_cursor_row < tty->rows && tty->prev_cursor_col < tty->cols)
+        tty_render_cell(tty, tty->prev_cursor_row, tty->prev_cursor_col);
+
+    if (tty->cursor_visible &&
+        tty->cursor_row < tty->rows && tty->cursor_col < tty->cols)
+        tty_render_cell_inverted(tty, tty->cursor_row, tty->cursor_col);
+
+    tty->prev_cursor_row = tty->cursor_row;
+    tty->prev_cursor_col = tty->cursor_col;
+}
+
+static void tty_scroll_cells(tty_t *tty, uint32_t top, uint32_t bot, int lines)
+{
+    if (top >= bot || bot > tty->rows || lines == 0)
+        return;
+
+    uint32_t region_h = bot - top;
+    uint32_t abs_lines = lines < 0 ? -lines : lines;
+    if (abs_lines >= region_h) {
+        for (uint32_t r = top; r < bot; r++)
+            for (uint32_t c = 0; c < tty->cols; c++)
+                tty_clear_cell(tty, r, c);
+        return;
+    }
+
+    uint32_t move_rows = region_h - abs_lines;
+    if (lines > 0) {
+        memmove(tty_cell_at(tty, top, 0),
+                tty_cell_at(tty, top + abs_lines, 0),
+                move_rows * tty->cols * sizeof(tty_cell_t));
+        for (uint32_t r = bot - abs_lines; r < bot; r++)
+            for (uint32_t c = 0; c < tty->cols; c++)
+                tty_clear_cell(tty, r, c);
+    } else {
+        memmove(tty_cell_at(tty, top + abs_lines, 0),
+                tty_cell_at(tty, top, 0),
+                move_rows * tty->cols * sizeof(tty_cell_t));
+        for (uint32_t r = top; r < top + abs_lines; r++)
+            for (uint32_t c = 0; c < tty->cols; c++)
+                tty_clear_cell(tty, r, c);
+    }
+}
+
+static void tty_scroll_fb(uint32_t top, uint32_t bot, int lines, uint32_t rows)
+{
+    uint32_t region_h = bot - top;
+    uint32_t abs_lines = (uint32_t)(lines < 0 ? -lines : lines);
+    if (abs_lines >= region_h) {
+        fb_clear_region(0, top * char_height, fb->width, bot * char_height);
+        return;
+    }
+
+    uint32_t move_rows = region_h - abs_lines;
+    uint32_t pitch4 = fb->pitch / 4;
+    (void)rows;
+
+    if (lines > 0) {
+        memmove(fb_ptr + top * char_height * pitch4,
+                fb_ptr + (top + abs_lines) * char_height * pitch4,
+                move_rows * char_height * fb->pitch);
+        fb_clear_region(0, (bot - abs_lines) * char_height,
+                        fb->width, bot * char_height);
+    } else {
+        memmove(fb_ptr + (top + abs_lines) * char_height * pitch4,
+                fb_ptr + top * char_height * pitch4,
+                move_rows * char_height * fb->pitch);
+        fb_clear_region(0, top * char_height,
+                        fb->width, (top + abs_lines) * char_height);
+    }
+}
+
+static void tty_do_scroll(tty_t *tty, uint32_t top, uint32_t bot, int lines)
+{
+    if (top >= bot || bot > tty->rows || lines == 0)
+        return;
+    tty_scroll_cells(tty, top, bot, lines);
+    tty_scroll_fb(top, bot, lines, tty->rows);
 }
 
 static void tty_scroll(tty_t *tty)
 {
-    fb_scroll();
+    uint32_t top = tty->scroll_top;
+    uint32_t bot = tty->scroll_bottom ? tty->scroll_bottom : tty->rows;
+    tty_do_scroll(tty, top, bot, 1);
     if (tty->cursor_row > 0)
         tty->cursor_row--;
 }
 
 static void tty_raw_putchar(tty_t *tty, char c)
 {
-    uint32_t saved_fg = fb_get_fg();
-    uint32_t saved_bg = fb_get_bg();
-    fb_set_color(tty->fg, tty->bg);
-
     if (c == '\n') {
         tty->cursor_col = 0;
         tty->cursor_row++;
-        if (tty->cursor_row >= tty->rows) {
+        if (tty->cursor_row >= tty->rows)
             tty_scroll(tty);
-        }
         tty_sync_cursor(tty);
     } else if (c == '\r') {
         tty->cursor_col = 0;
@@ -55,8 +168,6 @@ static void tty_raw_putchar(tty_t *tty, char c)
         if (tty->cursor_col > 0) {
             tty->cursor_col--;
             tty_sync_cursor(tty);
-            fb_putchar_at(' ', tty->cursor_col * char_width,
-                          tty->cursor_row * char_height);
         }
     } else if (c == '\t') {
         uint32_t next = (tty->cursor_col + 4) & ~3u;
@@ -71,10 +182,15 @@ static void tty_raw_putchar(tty_t *tty, char c)
         }
         tty_sync_cursor(tty);
     } else if (c == '\a') {
-        // bell - ignore
+        // bell
     } else if (c >= 32 || c < 0) {
-        fb_putchar_at(c, tty->cursor_col * char_width,
-                      tty->cursor_row * char_height);
+        tty_cell_t *cell = tty_cell_at(tty, tty->cursor_row, tty->cursor_col);
+        cell->c = c;
+        cell->fg = tty->fg;
+        cell->bg = tty->bg;
+        cell->bold = tty->bold;
+        cell->reverse = tty->reverse;
+        tty_render_cell(tty, tty->cursor_row, tty->cursor_col);
         tty->cursor_col++;
         if (tty->cursor_col >= tty->cols) {
             tty->cursor_col = 0;
@@ -84,8 +200,6 @@ static void tty_raw_putchar(tty_t *tty, char c)
         }
         tty_sync_cursor(tty);
     }
-
-    fb_set_color(saved_fg, saved_bg);
 }
 
 static int esc_param(tty_t *tty, int idx, int def)
@@ -101,6 +215,7 @@ static void tty_handle_sgr(tty_t *tty)
         tty->fg = 0xFFFFFF;
         tty->bg = 0x000000;
         tty->bold = false;
+        tty->reverse = false;
         return;
     }
 
@@ -112,8 +227,13 @@ static void tty_handle_sgr(tty_t *tty)
             tty->fg = 0xFFFFFF;
             tty->bg = 0x000000;
             tty->bold = false;
+            tty->reverse = false;
         } else if (p == 1) {
             tty->bold = true;
+        } else if (p == 7) {
+            tty->reverse = true;
+        } else if (p == 27) {
+            tty->reverse = false;
         } else if (p >= 30 && p <= 37) {
             tty->fg = tty->bold ? ansi_bright[p - 30] : ansi_colors[p - 30];
         } else if (p >= 40 && p <= 47) {
@@ -126,6 +246,44 @@ static void tty_handle_sgr(tty_t *tty)
             tty->fg = ansi_bright[p - 90];
         } else if (p >= 100 && p <= 107) {
             tty->bg = ansi_bright[p - 100];
+        }
+    }
+}
+
+static void tty_handle_dec_private(tty_t *tty, char c)
+{
+    int mode = esc_param(tty, 0, 0);
+    if (c == 'h') {
+        switch (mode) {
+        case 25:
+            tty->cursor_visible = true;
+            tty_sync_cursor(tty);
+            break;
+        case 1049:
+            for (uint32_t r = 0; r < tty->rows; r++)
+                for (uint32_t col = 0; col < tty->cols; col++)
+                    tty_clear_cell(tty, r, col);
+            fb_clear();
+            tty->cursor_row = 0;
+            tty->cursor_col = 0;
+            tty_sync_cursor(tty);
+            break;
+        }
+    } else if (c == 'l') {
+        switch (mode) {
+        case 25:
+            tty_render_cell(tty, tty->cursor_row, tty->cursor_col);
+            tty->cursor_visible = false;
+            break;
+        case 1049:
+            for (uint32_t r = 0; r < tty->rows; r++)
+                for (uint32_t col = 0; col < tty->cols; col++)
+                    tty_clear_cell(tty, r, col);
+            fb_clear();
+            tty->cursor_row = 0;
+            tty->cursor_col = 0;
+            tty_sync_cursor(tty);
+            break;
         }
     }
 }
@@ -174,7 +332,11 @@ static void tty_handle_csi(tty_t *tty, char c)
     case 'J': { // erase display
         n = esc_param(tty, 0, 0);
         if (n == 0) {
-            // erase from cursor to end
+            for (uint32_t col = tty->cursor_col; col < tty->cols; col++)
+                tty_clear_cell(tty, tty->cursor_row, col);
+            for (uint32_t r = tty->cursor_row + 1; r < tty->rows; r++)
+                for (uint32_t col = 0; col < tty->cols; col++)
+                    tty_clear_cell(tty, r, col);
             uint32_t cx = tty->cursor_col * char_width;
             uint32_t cy = tty->cursor_row * char_height;
             fb_clear_region(cx, cy, fb->width, cy + char_height);
@@ -182,6 +344,9 @@ static void tty_handle_csi(tty_t *tty, char c)
                 fb_clear_region(0, (tty->cursor_row + 1) * char_height,
                                 fb->width, tty->rows * char_height);
         } else if (n == 2) {
+            for (uint32_t r = 0; r < tty->rows; r++)
+                for (uint32_t col = 0; col < tty->cols; col++)
+                    tty_clear_cell(tty, r, col);
             fb_clear();
             tty->cursor_row = 0;
             tty->cursor_col = 0;
@@ -193,9 +358,18 @@ static void tty_handle_csi(tty_t *tty, char c)
         n = esc_param(tty, 0, 0);
         uint32_t cy = tty->cursor_row * char_height;
         if (n == 0) {
+            for (uint32_t col = tty->cursor_col; col < tty->cols; col++)
+                tty_clear_cell(tty, tty->cursor_row, col);
             fb_clear_region(tty->cursor_col * char_width, cy,
                             fb->width, cy + char_height);
+        } else if (n == 1) {
+            for (uint32_t col = 0; col <= tty->cursor_col; col++)
+                tty_clear_cell(tty, tty->cursor_row, col);
+            fb_clear_region(0, cy,
+                            (tty->cursor_col + 1) * char_width, cy + char_height);
         } else if (n == 2) {
+            for (uint32_t col = 0; col < tty->cols; col++)
+                tty_clear_cell(tty, tty->cursor_row, col);
             fb_clear_region(0, cy, fb->width, cy + char_height);
         }
         break;
@@ -210,13 +384,11 @@ static void tty_handle_csi(tty_t *tty, char c)
             int len = 0;
             resp[len++] = '\x1b';
             resp[len++] = '[';
-            // row (1-based)
             int row = tty->cursor_row + 1;
             if (row >= 100) resp[len++] = '0' + row / 100;
             if (row >= 10) resp[len++] = '0' + (row / 10) % 10;
             resp[len++] = '0' + row % 10;
             resp[len++] = ';';
-            // col (1-based)
             int col = tty->cursor_col + 1;
             if (col >= 100) resp[len++] = '0' + col / 100;
             if (col >= 10) resp[len++] = '0' + (col / 10) % 10;
@@ -225,6 +397,76 @@ static void tty_handle_csi(tty_t *tty, char c)
             for (int i = 0; i < len; i++)
                 tty_input_push(tty, resp[i]);
         }
+        break;
+    }
+    case 'L': { // insert lines
+        n = esc_param(tty, 0, 1);
+        uint32_t bot = tty->scroll_bottom ? tty->scroll_bottom : tty->rows;
+        tty_do_scroll(tty, tty->cursor_row, bot, -n);
+        break;
+    }
+    case 'M': { // delete lines
+        n = esc_param(tty, 0, 1);
+        uint32_t bot = tty->scroll_bottom ? tty->scroll_bottom : tty->rows;
+        tty_do_scroll(tty, tty->cursor_row, bot, n);
+        break;
+    }
+    case 'P': { // delete characters
+        n = esc_param(tty, 0, 1);
+        uint32_t row = tty->cursor_row;
+        uint32_t col = tty->cursor_col;
+        if (col + (uint32_t)n < tty->cols) {
+            memmove(tty_cell_at(tty, row, col),
+                    tty_cell_at(tty, row, col + n),
+                    (tty->cols - col - n) * sizeof(tty_cell_t));
+        }
+        for (uint32_t i = tty->cols - n; i < tty->cols; i++)
+            tty_clear_cell(tty, row, i);
+        for (uint32_t i = col; i < tty->cols; i++)
+            tty_render_cell(tty, row, i);
+        break;
+    }
+    case '@': { // insert characters
+        n = esc_param(tty, 0, 1);
+        uint32_t row = tty->cursor_row;
+        uint32_t col = tty->cursor_col;
+        if (col + (uint32_t)n < tty->cols) {
+            memmove(tty_cell_at(tty, row, col + n),
+                    tty_cell_at(tty, row, col),
+                    (tty->cols - col - n) * sizeof(tty_cell_t));
+        }
+        for (uint32_t i = col; i < col + (uint32_t)n && i < tty->cols; i++)
+            tty_clear_cell(tty, row, i);
+        for (uint32_t i = col; i < tty->cols; i++)
+            tty_render_cell(tty, row, i);
+        break;
+    }
+    case 'S': { // scroll up
+        n = esc_param(tty, 0, 1);
+        uint32_t top = tty->scroll_top;
+        uint32_t bot = tty->scroll_bottom ? tty->scroll_bottom : tty->rows;
+        tty_do_scroll(tty, top, bot, n);
+        break;
+    }
+    case 'T': { // scroll down
+        n = esc_param(tty, 0, 1);
+        uint32_t top = tty->scroll_top;
+        uint32_t bot = tty->scroll_bottom ? tty->scroll_bottom : tty->rows;
+        tty_do_scroll(tty, top, bot, -n);
+        break;
+    }
+    case 'r': { // set scroll region (DECSTBM)
+        int top = esc_param(tty, 0, 1) - 1;
+        int bot = esc_param(tty, 1, tty->rows);
+        if (top < 0) top = 0;
+        if ((uint32_t)bot > tty->rows) bot = tty->rows;
+        if (top < bot) {
+            tty->scroll_top = top;
+            tty->scroll_bottom = bot;
+        }
+        tty->cursor_row = 0;
+        tty->cursor_col = 0;
+        tty_sync_cursor(tty);
         break;
     }
     }
@@ -248,6 +490,7 @@ void tty_putchar(tty_t *tty, char c)
             tty->parse_state = TTY_STATE_CSI;
             tty->esc_param_count = 0;
             tty->esc_has_param = false;
+            tty->esc_private = false;
             for (int i = 0; i < TTY_ESC_PARAMS_MAX; i++)
                 tty->esc_params[i] = -1;
         } else {
@@ -256,6 +499,10 @@ void tty_putchar(tty_t *tty, char c)
         break;
 
     case TTY_STATE_CSI:
+        if (c == '?' && !tty->esc_has_param && tty->esc_param_count == 0) {
+            tty->esc_private = true;
+            break;
+        }
         if (c >= '0' && c <= '9') {
             if (!tty->esc_has_param) {
                 tty->esc_has_param = true;
@@ -279,7 +526,10 @@ void tty_putchar(tty_t *tty, char c)
         } else if (c >= 0x40 && c <= 0x7e) {
             if (tty->esc_has_param)
                 tty->esc_param_count++;
-            tty_handle_csi(tty, c);
+            if (tty->esc_private)
+                tty_handle_dec_private(tty, c);
+            else
+                tty_handle_csi(tty, c);
             tty->parse_state = TTY_STATE_NORMAL;
         } else {
             tty->parse_state = TTY_STATE_NORMAL;
@@ -324,7 +574,6 @@ void tty_input_scancode(tty_t *tty, uint8_t scancode, char ascii,
                         bool ctrl, bool shift)
 {
     if (tty->input_mode == TTY_MODE_RAW) {
-        // Arrow keys generate escape sequences
         switch (scancode) {
         case KEY_ARROW_UP:
             tty_input_push(tty, '\x1b');
@@ -359,9 +608,6 @@ void tty_input_scancode(tty_t *tty, uint8_t scancode, char ascii,
             return;
         }
 
-        // Home/End via scancode (these map to no ascii in scancode_map)
-        // Home and End aren't in the scancode enum; handle if needed
-
         if (ascii) {
             if (ctrl) {
                 ascii = ascii & 0x1f;
@@ -376,7 +622,6 @@ void tty_input_scancode(tty_t *tty, uint8_t scancode, char ascii,
         return;
     }
 
-    // Cooked mode: arrow keys are ignored
     if (scancode == KEY_ARROW_UP || scancode == KEY_ARROW_DOWN ||
         scancode == KEY_ARROW_LEFT || scancode == KEY_ARROW_RIGHT ||
         scancode == KEY_DELETE)
@@ -395,7 +640,6 @@ void tty_input_scancode(tty_t *tty, uint8_t scancode, char ascii,
     }
 
     if (ch == '\x03') {
-        // Ctrl+C: push it directly so reader can handle it
         tty->line_len = 0;
         tty_input_push(tty, ch);
         waitqueue_wake_all(&tty->input_wq);
@@ -403,9 +647,7 @@ void tty_input_scancode(tty_t *tty, uint8_t scancode, char ascii,
     }
 
     if (ch == '\x04') {
-        // Ctrl+D: EOF
         if (tty->line_len > 0) {
-            // flush current line without newline
             for (uint16_t i = 0; i < tty->line_len; i++)
                 tty_input_push(tty, tty->line_buf[i]);
             tty->line_len = 0;
@@ -429,6 +671,8 @@ void tty_input_scancode(tty_t *tty, uint8_t scancode, char ascii,
     if (ch == '\b') {
         if (tty->line_len > 0) {
             tty->line_len--;
+            tty_raw_putchar(tty, '\b');
+            tty_raw_putchar(tty, ' ');
             tty_raw_putchar(tty, '\b');
         }
         return;
@@ -477,9 +721,19 @@ void tty_init(void)
         ttys[i].rows = rows;
         ttys[i].fg = 0xFFFFFF;
         ttys[i].bg = 0x000000;
+        ttys[i].cursor_visible = true;
         ttys[i].input_mode = TTY_MODE_COOKED;
         ttys[i].parse_state = TTY_STATE_NORMAL;
+        ttys[i].scroll_top = 0;
+        ttys[i].scroll_bottom = rows;
         waitqueue_init(&ttys[i].input_wq);
         ttys[i].active = (i == 0);
+
+        ttys[i].cells = malloc(cols * rows * sizeof(tty_cell_t));
+        for (uint32_t r = 0; r < rows; r++)
+            for (uint32_t c = 0; c < cols; c++)
+                tty_clear_cell(&ttys[i], r, c);
     }
+
+    fb_hide_cursor();
 }

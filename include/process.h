@@ -40,6 +40,8 @@ typedef struct {
     wasm_process_t *wasm_proc;
     waitqueue_t exit_wq;
 
+    volatile uint64_t sig_pending;
+
     int32_t tracer_pid;
     bool ptrace_syscall;
     ptrace_info_t ptrace_info;
@@ -53,3 +55,4 @@ void proc_free(int32_t pid);
 int32_t proc_foreground_pid(void);
 void proc_set_foreground(int32_t pid);
 void proc_mark_exited(int32_t pid, int32_t exit_code);
+void wali_check_timers(void);

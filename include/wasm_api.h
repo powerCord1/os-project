@@ -60,6 +60,14 @@ typedef struct wasm_process {
     uint32_t c_iflag, c_oflag, c_cflag, c_lflag;
     uint8_t c_cc[20];
     uint32_t umask;
+
+    uint32_t sigactions[64];
+    uint64_t sig_mask;
+    uint64_t sig_pending;
+
+    int64_t itimer_interval_us;
+    int64_t itimer_value_us;
+    uint64_t itimer_next_tick;
 } wasm_process_t;
 
 wasm_process_t *wasm_process_create(int argc, char **argv);

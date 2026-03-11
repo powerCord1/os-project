@@ -267,7 +267,12 @@ static int64_t wali_do_read(wasm_process_t *proc, int32_t fd,
             while (!tty_input_pop(tty, &c)) {
                 proc_entry_t *e = proc_get(proc->pid);
                 if (e && e->killed)
-                    return -L_EINTR;
+                    return i > 0 ? (int64_t)i : -L_EINTR;
+                if (e && (e->sig_pending & ~proc->sig_mask)) {
+                    proc->sig_pending |= e->sig_pending;
+                    e->sig_pending = 0;
+                    return i > 0 ? (int64_t)i : -L_EINTR;
+                }
                 waitqueue_sleep(&tty->input_wq);
             }
             if (c == '\x03')
@@ -275,6 +280,8 @@ static int64_t wali_do_read(wasm_process_t *proc, int32_t fd,
             if (c == '\x04')
                 return i;
             buf[i++] = (uint8_t)c;
+            if (tty->input_mode == TTY_MODE_RAW)
+                break;
             if (c == '\n')
                 break;
         }
@@ -481,16 +488,59 @@ static int64_t wali_sys_set_tid_address(wasm_exec_env_t exec_env, int32_t tidptr
 static int64_t wali_sys_rt_sigaction(wasm_exec_env_t exec_env, int32_t signum,
                                       int32_t act, int32_t oldact, uint32_t sigsetsize)
 {
+    (void)sigsetsize;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    if (signum < 1 || signum > 64)
+        return -L_EINVAL;
 
-    (void)exec_env; (void)signum; (void)act; (void)oldact; (void)sigsetsize;
+    if (oldact) {
+        uint32_t *oa = wali_get_mem(exec_env, oldact, 20);
+        if (!oa)
+            return -L_EFAULT;
+        memset(oa, 0, 20);
+        oa[0] = proc->sigactions[signum - 1];
+    }
+
+    if (act) {
+        uint32_t *a = wali_get_mem(exec_env, act, 20);
+        if (!a)
+            return -L_EFAULT;
+        proc->sigactions[signum - 1] = a[0];
+    }
+
     return 0;
 }
 
 static int64_t wali_sys_rt_sigprocmask(wasm_exec_env_t exec_env, int32_t how,
                                         int32_t set, int32_t oldset, uint32_t sigsetsize)
 {
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    uint32_t setsz = sigsetsize < 128 ? sigsetsize : 128;
 
-    (void)exec_env; (void)how; (void)set; (void)oldset; (void)sigsetsize;
+    if (oldset) {
+        uint8_t *os = wali_get_mem(exec_env, oldset, setsz);
+        if (!os)
+            return -L_EFAULT;
+        memset(os, 0, setsz);
+        if (setsz >= 8)
+            memcpy(os, &proc->sig_mask, 8);
+    }
+
+    if (set) {
+        uint8_t *s = wali_get_mem(exec_env, set, setsz);
+        if (!s)
+            return -L_EFAULT;
+        uint64_t val = 0;
+        if (setsz >= 8)
+            memcpy(&val, s, 8);
+        switch (how) {
+        case L_SIG_BLOCK:   proc->sig_mask |= val; break;
+        case L_SIG_UNBLOCK: proc->sig_mask &= ~val; break;
+        case L_SIG_SETMASK: proc->sig_mask = val; break;
+        default: return -L_EINVAL;
+        }
+    }
+
     return 0;
 }
 
@@ -1481,6 +1531,32 @@ static int64_t wali_sys_ioctl(wasm_exec_env_t exec_env, int32_t fd,
     }
 }
 
+static bool fd_check_readable(wasm_process_t *proc, int fd)
+{
+    wasm_fd_t *f = &proc->fds[fd];
+    switch (f->type) {
+    case FD_CONSOLE: {
+        tty_t *tty = tty_get(proc->tty_id);
+        return tty->input_head != tty->input_tail;
+    }
+    case FD_FILE:
+        return f->file.pos < f->file.size;
+    case FD_PIPE_READ: {
+        pipe_t *p = pipe_get(f->pipe.pipe_id);
+        return p && (p->head != p->tail || p->write_refs == 0);
+    }
+    default:
+        return false;
+    }
+}
+
+static bool fd_check_writable(wasm_process_t *proc, int fd)
+{
+    wasm_fd_t *f = &proc->fds[fd];
+    return f->type == FD_CONSOLE || f->type == FD_PIPE_WRITE ||
+           (f->type == FD_FILE && f->file.writable);
+}
+
 static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
                               uint64_t nfds, int32_t timeout)
 {
@@ -1513,32 +1589,16 @@ static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
             }
 
             if (pfds[i].events & L_POLLIN) {
-                switch (f->type) {
-                case FD_CONSOLE: {
-                    tty_t *tty = tty_get(proc->tty_id);
-                    if (tty->input_head != tty->input_tail)
-                        pfds[i].revents |= L_POLLIN;
-                    break;
-                }
-                case FD_FILE:
-                    if (f->file.pos < f->file.size)
-                        pfds[i].revents |= L_POLLIN;
-                    break;
-                case FD_PIPE_READ: {
+                if (fd_check_readable(proc, fd))
+                    pfds[i].revents |= L_POLLIN;
+                else if (f->type == FD_PIPE_READ) {
                     pipe_t *p = pipe_get(f->pipe.pipe_id);
-                    if (p && p->head != p->tail)
-                        pfds[i].revents |= L_POLLIN;
-                    else if (p && p->write_refs == 0)
+                    if (p && p->write_refs == 0)
                         pfds[i].revents |= L_POLLHUP;
-                    break;
-                }
-                default:
-                    break;
                 }
             }
             if (pfds[i].events & L_POLLOUT) {
-                if (f->type == FD_CONSOLE || f->type == FD_PIPE_WRITE ||
-                    (f->type == FD_FILE && f->file.writable))
+                if (fd_check_writable(proc, fd))
                     pfds[i].revents |= L_POLLOUT;
             }
             if (pfds[i].revents)
@@ -1548,6 +1608,17 @@ static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
         if (ready > 0 || timeout == 0)
             break;
 
+        proc_entry_t *e = proc_get(proc->pid);
+        if (e) {
+            if (e->killed)
+                return -L_EINTR;
+            if (e->sig_pending & ~proc->sig_mask) {
+                proc->sig_pending |= e->sig_pending;
+                e->sig_pending = 0;
+                return -L_EINTR;
+            }
+        }
+
         if (timeout < 0) {
             tty_t *tty = tty_get(proc->tty_id);
             waitqueue_sleep(&tty->input_wq);
@@ -1556,10 +1627,6 @@ static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
                 break;
             scheduler_yield();
         }
-
-        proc_entry_t *e = proc_get(proc->pid);
-        if (e && e->killed)
-            return -L_EINTR;
     } while (1);
 
     return (int64_t)ready;
@@ -1605,32 +1672,16 @@ static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
                 continue;
             }
             if (pfds[i].events & L_POLLIN) {
-                switch (f->type) {
-                case FD_CONSOLE: {
-                    tty_t *tty = tty_get(proc->tty_id);
-                    if (tty->input_head != tty->input_tail)
-                        pfds[i].revents |= L_POLLIN;
-                    break;
-                }
-                case FD_FILE:
-                    if (f->file.pos < f->file.size)
-                        pfds[i].revents |= L_POLLIN;
-                    break;
-                case FD_PIPE_READ: {
+                if (fd_check_readable(proc, fd))
+                    pfds[i].revents |= L_POLLIN;
+                else if (f->type == FD_PIPE_READ) {
                     pipe_t *p = pipe_get(f->pipe.pipe_id);
-                    if (p && p->head != p->tail)
-                        pfds[i].revents |= L_POLLIN;
-                    else if (p && p->write_refs == 0)
+                    if (p && p->write_refs == 0)
                         pfds[i].revents |= L_POLLHUP;
-                    break;
-                }
-                default:
-                    break;
                 }
             }
             if (pfds[i].events & L_POLLOUT) {
-                if (f->type == FD_CONSOLE || f->type == FD_PIPE_WRITE ||
-                    (f->type == FD_FILE && f->file.writable))
+                if (fd_check_writable(proc, fd))
                     pfds[i].revents |= L_POLLOUT;
             }
             if (pfds[i].revents)
@@ -1640,6 +1691,17 @@ static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
         if (ready > 0 || timeout_ms == 0)
             break;
 
+        proc_entry_t *e = proc_get(proc->pid);
+        if (e) {
+            if (e->killed)
+                return -L_EINTR;
+            if (e->sig_pending & ~proc->sig_mask) {
+                proc->sig_pending |= e->sig_pending;
+                e->sig_pending = 0;
+                return -L_EINTR;
+            }
+        }
+
         if (timeout_ms < 0) {
             tty_t *tty = tty_get(proc->tty_id);
             waitqueue_sleep(&tty->input_wq);
@@ -1648,10 +1710,6 @@ static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
                 break;
             scheduler_yield();
         }
-
-        proc_entry_t *e = proc_get(proc->pid);
-        if (e && e->killed)
-            return -L_EINTR;
     } while (1);
 
     return (int64_t)ready;
@@ -1995,6 +2053,280 @@ static int64_t wali_sys_ptrace(wasm_exec_env_t exec_env, int32_t request,
     }
 }
 
+void wali_check_timers(void)
+{
+    for (int i = 0; i < PROC_MAX; i++) {
+        proc_entry_t *e = proc_get(i + 1);
+        if (!e || !e->wasm_proc)
+            continue;
+        wasm_process_t *proc = e->wasm_proc;
+        if (proc->itimer_next_tick == 0)
+            continue;
+        if (pit_ticks >= proc->itimer_next_tick) {
+            e->sig_pending |= (1ULL << (L_SIGALRM - 1));
+            tty_t *tty = tty_get(proc->tty_id);
+            if (tty)
+                waitqueue_wake_all(&tty->input_wq);
+            if (proc->itimer_interval_us > 0)
+                proc->itimer_next_tick += proc->itimer_interval_us / 1000;
+            else
+                proc->itimer_next_tick = 0;
+        }
+    }
+}
+
+static int64_t wali_sys_select(wasm_exec_env_t exec_env, int32_t nfds,
+                                int32_t readfds_off, int32_t writefds_off,
+                                int32_t exceptfds_off, int32_t timeout_off)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    if (nfds < 0 || nfds > WASM_MAX_FDS)
+        nfds = WASM_MAX_FDS;
+
+    uint64_t rfds = 0, wfds = 0, efds = 0;
+    if (readfds_off) {
+        uint8_t *p = wali_get_mem(exec_env, readfds_off, 128);
+        if (!p) return -L_EFAULT;
+        memcpy(&rfds, p, 8);
+    }
+    if (writefds_off) {
+        uint8_t *p = wali_get_mem(exec_env, writefds_off, 128);
+        if (!p) return -L_EFAULT;
+        memcpy(&wfds, p, 8);
+    }
+    if (exceptfds_off) {
+        uint8_t *p = wali_get_mem(exec_env, exceptfds_off, 128);
+        if (!p) return -L_EFAULT;
+        memcpy(&efds, p, 8);
+    }
+
+    int32_t timeout_ms = -1;
+    if (timeout_off) {
+        linux_timeval_t *tv = wali_get_mem(exec_env, timeout_off, sizeof(linux_timeval_t));
+        if (!tv) return -L_EFAULT;
+        timeout_ms = (int32_t)(tv->tv_sec * 1000 + tv->tv_usec / 1000);
+    }
+
+    uint64_t deadline = 0;
+    if (timeout_ms > 0)
+        deadline = pit_ticks + (uint64_t)timeout_ms;
+
+    int ready;
+    do {
+        ready = 0;
+        uint64_t r_out = 0, w_out = 0;
+
+        for (int fd = 0; fd < nfds; fd++) {
+            uint64_t bit = 1ULL << fd;
+            if (fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
+                continue;
+            if ((rfds & bit) && fd_check_readable(proc, fd)) {
+                r_out |= bit;
+                ready++;
+            }
+            if ((wfds & bit) && fd_check_writable(proc, fd)) {
+                w_out |= bit;
+                ready++;
+            }
+        }
+
+        if (ready > 0 || timeout_ms == 0) {
+            if (readfds_off) {
+                uint8_t *p = wali_get_mem(exec_env, readfds_off, 128);
+                memset(p, 0, 128);
+                memcpy(p, &r_out, 8);
+            }
+            if (writefds_off) {
+                uint8_t *p = wali_get_mem(exec_env, writefds_off, 128);
+                memset(p, 0, 128);
+                memcpy(p, &w_out, 8);
+            }
+            if (exceptfds_off) {
+                uint8_t *p = wali_get_mem(exec_env, exceptfds_off, 128);
+                memset(p, 0, 128);
+            }
+            break;
+        }
+
+        proc_entry_t *e = proc_get(proc->pid);
+        if (e) {
+            if (e->killed)
+                return -L_EINTR;
+            uint64_t deliverable = e->sig_pending & ~proc->sig_mask;
+            if (deliverable) {
+                proc->sig_pending |= e->sig_pending;
+                e->sig_pending = 0;
+                return -L_EINTR;
+            }
+        }
+
+        if (timeout_ms < 0) {
+            tty_t *tty = tty_get(proc->tty_id);
+            waitqueue_sleep(&tty->input_wq);
+        } else {
+            if (pit_ticks >= deadline)
+                break;
+            scheduler_yield();
+        }
+    } while (1);
+
+    return (int64_t)ready;
+}
+
+static int64_t wali_sys_setitimer(wasm_exec_env_t exec_env, int32_t which,
+                                   int32_t new_value_off, int32_t old_value_off)
+{
+    if (which != L_ITIMER_REAL)
+        return -L_EINVAL;
+
+    wasm_process_t *proc = WALI_PROC(exec_env);
+
+    if (old_value_off) {
+        linux_itimerval_t *ov = wali_get_mem(exec_env, old_value_off,
+                                              sizeof(linux_itimerval_t));
+        if (!ov) return -L_EFAULT;
+        ov->it_interval.tv_sec = proc->itimer_interval_us / 1000000;
+        ov->it_interval.tv_usec = proc->itimer_interval_us % 1000000;
+        if (proc->itimer_next_tick > pit_ticks) {
+            int64_t remain_ms = (int64_t)(proc->itimer_next_tick - pit_ticks);
+            ov->it_value.tv_sec = remain_ms / 1000;
+            ov->it_value.tv_usec = (remain_ms % 1000) * 1000;
+        } else {
+            ov->it_value.tv_sec = 0;
+            ov->it_value.tv_usec = 0;
+        }
+    }
+
+    if (new_value_off) {
+        linux_itimerval_t *nv = wali_get_mem(exec_env, new_value_off,
+                                              sizeof(linux_itimerval_t));
+        if (!nv) return -L_EFAULT;
+        proc->itimer_interval_us = nv->it_interval.tv_sec * 1000000 +
+                                    nv->it_interval.tv_usec;
+        proc->itimer_value_us = nv->it_value.tv_sec * 1000000 +
+                                 nv->it_value.tv_usec;
+        if (proc->itimer_value_us > 0) {
+            uint64_t ms = (uint64_t)(proc->itimer_value_us / 1000);
+            if (ms == 0) ms = 1;
+            proc->itimer_next_tick = pit_ticks + ms;
+        } else {
+            proc->itimer_next_tick = 0;
+        }
+    }
+
+    return 0;
+}
+
+static int64_t wali_sys_sync(wasm_exec_env_t exec_env)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    for (int i = 0; i < WASM_MAX_FDS; i++) {
+        wasm_fd_t *f = &proc->fds[i];
+        if (f->type == FD_FILE && f->file.dirty && f->file.data) {
+            vfs_write_file(f->file.parent_cluster, f->file.filename,
+                           f->file.data, f->file.size);
+            f->file.dirty = false;
+        }
+    }
+    return 0;
+}
+
+static int64_t wali_sys_rt_sigpending(wasm_exec_env_t exec_env, int32_t set_off,
+                                       uint32_t sigsetsize)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    uint32_t setsz = sigsetsize < 128 ? sigsetsize : 128;
+    uint8_t *s = wali_get_mem(exec_env, set_off, setsz);
+    if (!s)
+        return -L_EFAULT;
+
+    proc_entry_t *e = proc_get(proc->pid);
+    uint64_t pending = 0;
+    if (e)
+        pending = e->sig_pending & proc->sig_mask;
+
+    memset(s, 0, setsz);
+    if (setsz >= 8)
+        memcpy(s, &pending, 8);
+    return 0;
+}
+
+static int64_t wali_sys_fork(wasm_exec_env_t exec_env)
+{
+    (void)exec_env;
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_setxattr(wasm_exec_env_t exec_env, int32_t path,
+                                  int32_t name, int32_t value,
+                                  int32_t size, int32_t flags)
+{
+    (void)exec_env; (void)path; (void)name; (void)value; (void)size; (void)flags;
+    return -L_ENOTSUP;
+}
+
+static int64_t wali_sys_getxattr(wasm_exec_env_t exec_env, int32_t path,
+                                  int32_t name, int32_t value, int32_t size)
+{
+    (void)exec_env; (void)path; (void)name; (void)value; (void)size;
+    return -L_ENOTSUP;
+}
+
+static int64_t wali_sys_listxattr(wasm_exec_env_t exec_env, int32_t path,
+                                   int32_t list, int32_t size)
+{
+    (void)exec_env; (void)path; (void)list; (void)size;
+    return -L_ENOTSUP;
+}
+
+static int64_t wali_sys_sendto(wasm_exec_env_t exec_env, int32_t sockfd,
+                                int32_t buf, int32_t len, int32_t flags,
+                                int32_t dest_addr, int32_t addrlen)
+{
+    (void)exec_env; (void)sockfd; (void)buf; (void)len;
+    (void)flags; (void)dest_addr; (void)addrlen;
+    return -L_EAFNOSUPPORT;
+}
+
+static int64_t wali_sys_recvmsg(wasm_exec_env_t exec_env, int32_t sockfd,
+                                 int32_t msg, int32_t flags)
+{
+    (void)exec_env; (void)sockfd; (void)msg; (void)flags;
+    return -L_EAFNOSUPPORT;
+}
+
+static int64_t wali_sys_bind(wasm_exec_env_t exec_env, int32_t sockfd,
+                              int32_t addr, int32_t addrlen)
+{
+    (void)exec_env; (void)sockfd; (void)addr; (void)addrlen;
+    return -L_EAFNOSUPPORT;
+}
+
+static int64_t wali_sys_getsockname(wasm_exec_env_t exec_env, int32_t sockfd,
+                                     int32_t addr, int32_t addrlen)
+{
+    (void)exec_env; (void)sockfd; (void)addr; (void)addrlen;
+    return -L_EAFNOSUPPORT;
+}
+
+static int64_t wali_sys_setsockopt(wasm_exec_env_t exec_env, int32_t sockfd,
+                                    int32_t level, int32_t optname,
+                                    int32_t optval, int32_t optlen)
+{
+    (void)exec_env; (void)sockfd; (void)level; (void)optname;
+    (void)optval; (void)optlen;
+    return -L_EAFNOSUPPORT;
+}
+
+static int64_t wali_sys_getsockopt(wasm_exec_env_t exec_env, int32_t sockfd,
+                                    int32_t level, int32_t optname,
+                                    int32_t optval, int32_t optlen)
+{
+    (void)exec_env; (void)sockfd; (void)level; (void)optname;
+    (void)optval; (void)optlen;
+    return -L_EAFNOSUPPORT;
+}
+
 static int64_t wali_sys_stub(wasm_exec_env_t exec_env)
 {
     (void)exec_env;
@@ -2006,8 +2338,7 @@ static int64_t wali_sys_socket(wasm_exec_env_t exec_env, int32_t domain,
                                 int32_t type, int32_t protocol)
 {
     (void)exec_env; (void)domain; (void)type; (void)protocol;
-    wali_stub_log(SYS_SOCKET);
-    return -L_ENOSYS;
+    return -L_EAFNOSUPPORT;
 }
 
 static int64_t wali_sys_connect(wasm_exec_env_t exec_env, int32_t sockfd,
@@ -2338,6 +2669,20 @@ DEF_TRACED_3(wali_sys_futimesat, SYS_FUTIMESAT)
 DEF_TRACED_2(wali_sys_set_robust_list, SYS_SET_ROBUST_LIST)
 DEF_TRACED_4(wali_sys_utimensat, SYS_UTIMENSAT)
 DEF_TRACED_4(wali_sys_ptrace, SYS_PTRACE)
+DEF_TRACED_5(wali_sys_select, SYS_SELECT)
+DEF_TRACED_3(wali_sys_setitimer, SYS_SETITIMER)
+DEF_TRACED_0(wali_sys_sync, SYS_SYNC)
+DEF_TRACED_2iu(wali_sys_rt_sigpending, SYS_RT_SIGPENDING)
+DEF_TRACED_0(wali_sys_fork, SYS_FORK)
+DEF_TRACED_5(wali_sys_setxattr, SYS_SETXATTR)
+DEF_TRACED_4(wali_sys_getxattr, SYS_GETXATTR)
+DEF_TRACED_3(wali_sys_listxattr, SYS_LISTXATTR)
+DEF_TRACED_6(wali_sys_sendto, SYS_SENDTO)
+DEF_TRACED_3(wali_sys_recvmsg, SYS_RECVMSG)
+DEF_TRACED_3(wali_sys_bind, SYS_BIND)
+DEF_TRACED_3(wali_sys_getsockname, SYS_GETSOCKNAME)
+DEF_TRACED_5(wali_sys_setsockopt, SYS_SETSOCKOPT)
+DEF_TRACED_5(wali_sys_getsockopt, SYS_GETSOCKOPT)
 
 static NativeSymbol wali_symbols[] = {
     /* Aux functions */
@@ -2442,9 +2787,18 @@ static NativeSymbol wali_symbols[] = {
     { "SYS_execve",         (void *)wali_sys_execve_pt,        "(iii)I",       NULL },
     { "SYS_wait4",          (void *)wali_sys_wait4_pt,         "(iiii)I",      NULL },
     { "SYS_ptrace",         (void *)wali_sys_ptrace_pt,        "(iiii)I",      NULL },
+    { "SYS_select",         (void *)wali_sys_select_pt,        "(iiiii)I",     NULL },
+    { "SYS_setitimer",      (void *)wali_sys_setitimer_pt,     "(iii)I",       NULL },
     { "SYS_socket",         (void *)wali_sys_socket_pt,        "(iii)I",       NULL },
     { "SYS_connect",        (void *)wali_sys_connect_pt,       "(iii)I",       NULL },
+    { "SYS_sendto",         (void *)wali_sys_sendto_pt,        "(iiiiii)I",    NULL },
     { "SYS_sendmsg",        (void *)wali_sys_sendmsg_pt,       "(iii)I",       NULL },
+    { "SYS_recvmsg",        (void *)wali_sys_recvmsg_pt,       "(iii)I",       NULL },
+    { "SYS_bind",           (void *)wali_sys_bind_pt,          "(iii)I",       NULL },
+    { "SYS_getsockname",    (void *)wali_sys_getsockname_pt,   "(iii)I",       NULL },
+    { "SYS_setsockopt",     (void *)wali_sys_setsockopt_pt,    "(iiiii)I",     NULL },
+    { "SYS_getsockopt",     (void *)wali_sys_getsockopt_pt,    "(iiiii)I",     NULL },
+    { "SYS_fork",           (void *)wali_sys_fork_pt,          "()I",          NULL },
     { "SYS_symlink",        (void *)wali_sys_symlink_pt,       "(ii)I",        NULL },
     { "SYS_chown",          (void *)wali_sys_chown_pt,         "(iii)I",       NULL },
     { "SYS_fchown",         (void *)wali_sys_fchown_pt,        "(iii)I",       NULL },
@@ -2456,6 +2810,11 @@ static NativeSymbol wali_symbols[] = {
     { "SYS_futimesat",      (void *)wali_sys_futimesat_pt,     "(iii)I",       NULL },
     { "SYS_set_robust_list",(void *)wali_sys_set_robust_list_pt,"(ii)I",       NULL },
     { "SYS_utimensat",      (void *)wali_sys_utimensat_pt,     "(iiii)I",      NULL },
+    { "SYS_rt_sigpending",  (void *)wali_sys_rt_sigpending_pt, "(ii)I",       NULL },
+    { "SYS_sync",           (void *)wali_sys_sync_pt,          "()I",          NULL },
+    { "SYS_setxattr",       (void *)wali_sys_setxattr_pt,      "(iiiii)I",     NULL },
+    { "SYS_getxattr",       (void *)wali_sys_getxattr_pt,      "(iiii)I",      NULL },
+    { "SYS_listxattr",      (void *)wali_sys_listxattr_pt,     "(iii)I",       NULL },
 };
 
 void wasm_register_wali_natives(void)

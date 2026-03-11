@@ -112,7 +112,8 @@ void fb_hide_cursor()
 
 void fb_set_cursor(uint32_t x, uint32_t y)
 {
-    fb_erase_cursor();
+    if (cursor.visible)
+        fb_erase_cursor();
     cursor.x = x;
     cursor.y = y;
     if (cursor.visible) {
