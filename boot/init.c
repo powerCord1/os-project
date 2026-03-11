@@ -27,8 +27,9 @@
 bool is_system_initialised = false;
 
 boot_task_t early_boot_tasks[] = {
-    {.msg = "Init CPU Features", .func = cpu_init},
-    {.msg = "Init serial", .func = serial_init}, // So we can get debug info
+#if EARLY_SERIAL
+    {.msg = "Init serial", .func = serial_init}, // so we can get debug info
+#endif
     {.msg = "Log boot info", .func = log_boot_info},
     {.msg = "Store boot time", .func = store_boot_time},
 };
@@ -37,6 +38,9 @@ boot_task_t boot_tasks[] = {
     {.msg = "Send Limine requests", .func = limine_init},
     {.msg = "Init font", .func = font_init},
     {.msg = "Init framebuffer", .func = fb_init},
+#if !EARLY_SERIAL
+    {.msg = "Init serial", .func = serial_init},
+#endif
     {.msg = "Init heap", .func = heap_init},
     {.msg = "Init GDT", .func = gdt_init},
     {.msg = "Init IDT", .func = idt_init},
