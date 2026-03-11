@@ -177,15 +177,19 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         return -1;
     }
 
+    bool did_attach_kbd = false;
     if (proc->fds[0].type == FD_CONSOLE) {
         tty_t *t = tty_get(proc->tty_id);
         tty_input_flush(t);
         tty_sync_from_fb(t);
-        tty_attach_keyboard(t);
+        if (!t->keyboard_attached) {
+            tty_attach_keyboard(t);
+            did_attach_kbd = true;
+        }
     }
     result = m3_Call(func, 0, NULL);
 
-    if (proc->fds[0].type == FD_CONSOLE) {
+    if (proc->fds[0].type == FD_CONSOLE && did_attach_kbd) {
         tty_detach_keyboard(tty_get(proc->tty_id));
         kbd_buffer_init();
     }
