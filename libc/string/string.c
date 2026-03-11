@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ctype.h>
 #include <debug.h>
 #include <heap.h>
 #include <string.h>
@@ -136,22 +137,6 @@ char *strpbrk(const char *str, const char *accept)
         }
     }
     return NULL;
-}
-
-int tolower(int c)
-{
-    if (c >= 'A' && c <= 'Z') {
-        return c - 'A' + 'a';
-    }
-    return c;
-}
-
-int toupper(int c)
-{
-    if (c >= 'a' && c <= 'z') {
-        return c - 'a' + 'A';
-    }
-    return c;
 }
 
 int strcasecmp(const char *s1, const char *s2)
@@ -400,20 +385,24 @@ int strncmp(const char *s1, const char *s2, size_t n)
 
 static int digit_value(char c)
 {
-    if (c >= '0' && c <= '9')
+    if (c >= '0' && c <= '9') {
         return c - '0';
-    if (c >= 'a' && c <= 'z')
+    }
+    if (c >= 'a' && c <= 'z') {
         return c - 'a' + 10;
-    if (c >= 'A' && c <= 'Z')
+    }
+    if (c >= 'A' && c <= 'Z') {
         return c - 'A' + 10;
+    }
     return -1;
 }
 
 unsigned long strtoul(const char *nptr, char **endptr, int base)
 {
     const char *s = nptr;
-    while (*s == ' ' || *s == '\t' || *s == '\n')
+    while (*s == ' ' || *s == '\t' || *s == '\n') {
         s++;
+    }
 
     if (base == 0) {
         if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) {
@@ -436,16 +425,18 @@ unsigned long strtoul(const char *nptr, char **endptr, int base)
         s++;
     }
 
-    if (endptr)
+    if (endptr) {
         *endptr = (char *)s;
+    }
     return result;
 }
 
 unsigned long long strtoull(const char *nptr, char **endptr, int base)
 {
     const char *s = nptr;
-    while (*s == ' ' || *s == '\t' || *s == '\n')
+    while (*s == ' ' || *s == '\t' || *s == '\n') {
         s++;
+    }
 
     if (base == 0) {
         if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) {
@@ -468,16 +459,18 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base)
         s++;
     }
 
-    if (endptr)
+    if (endptr) {
         *endptr = (char *)s;
+    }
     return result;
 }
 
 double strtod(const char *nptr, char **endptr)
 {
     const char *s = nptr;
-    while (*s == ' ' || *s == '\t' || *s == '\n')
+    while (*s == ' ' || *s == '\t' || *s == '\n') {
         s++;
+    }
 
     double sign = 1.0;
     if (*s == '-') {
@@ -503,7 +496,8 @@ double strtod(const char *nptr, char **endptr)
         }
     }
 
-    if (endptr)
+    if (endptr) {
         *endptr = (char *)s;
+    }
     return sign * result;
 }

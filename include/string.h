@@ -19,9 +19,6 @@ char *strtok(char *str, const char *delim);
 size_t strspn(const char *str, const char *accept);
 char *strpbrk(const char *str, const char *accept);
 
-int tolower(int c);
-int toupper(int c);
-
 char *strncpy(char *dest, const char *src, size_t n);
 char *strncat(char *dest, const char *src, size_t n);
 size_t strnlen(const char *s, size_t maxlen);
