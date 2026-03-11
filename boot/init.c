@@ -27,6 +27,7 @@
 bool is_system_initialised = false;
 
 boot_task_t early_boot_tasks[] = {
+    {.msg = "Set CPU features", .func = cpu_init},
 #if EARLY_SERIAL
     {.msg = "Init serial", .func = serial_init}, // so we can get debug info
 #endif
