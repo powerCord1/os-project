@@ -35,6 +35,24 @@ wasm_process_t *wasm_process_create(int argc, char **argv)
     proc->fds[1].type = FD_CONSOLE;
     proc->fds[2].type = FD_CONSOLE;
 
+    proc->brk_addr = 0;
+    proc->mmap_top = 0;
+    strncpy(proc->cwd, "/", sizeof(proc->cwd));
+
+    proc->c_iflag = 0x0500;  /* ICRNL | IXON */
+    proc->c_oflag = 0x0005;  /* OPOST | ONLCR */
+    proc->c_cflag = 0x00BF;  /* CS8 | CREAD | B38400 */
+    proc->c_lflag = 0x8A3B;  /* ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN */
+    memset(proc->c_cc, 0, sizeof(proc->c_cc));
+    proc->c_cc[0] = 0x03;  /* VINTR = Ctrl-C */
+    proc->c_cc[1] = 0x1C;  /* VQUIT */
+    proc->c_cc[2] = 0x7F;  /* VERASE */
+    proc->c_cc[3] = 0x15;  /* VKILL */
+    proc->c_cc[4] = 0x04;  /* VEOF = Ctrl-D */
+    proc->c_cc[5] = 0x00;  /* VTIME */
+    proc->c_cc[6] = 0x01;  /* VMIN */
+    proc->umask = 0022;
+
     return proc;
 }
 

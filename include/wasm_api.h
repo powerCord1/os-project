@@ -5,7 +5,7 @@
 
 #include "wasm3.h"
 
-#define WASM_MAX_FDS 16
+#define WASM_MAX_FDS 64
 #define WASM_MAX_ARGC 16
 #define WASM_MAX_ARG_LEN 256
 
@@ -51,8 +51,18 @@ typedef struct wasm_process {
     int32_t pid;
     int tty_id;
     wasm_fd_t fds[WASM_MAX_FDS];
+    uint32_t fd_flags[WASM_MAX_FDS];
+
+    uint32_t brk_addr;
+    uint32_t mmap_top;
+    char cwd[256];
+
+    uint32_t c_iflag, c_oflag, c_cflag, c_lflag;
+    uint8_t c_cc[20];
+    uint32_t umask;
 } wasm_process_t;
 
 wasm_process_t *wasm_process_create(int argc, char **argv);
 void wasm_process_destroy(wasm_process_t *proc);
 void wasm_link_api(IM3Module module, wasm_process_t *proc);
+void wali_link_api(IM3Module module, IM3Runtime runtime, wasm_process_t *proc);

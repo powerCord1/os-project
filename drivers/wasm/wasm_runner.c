@@ -159,6 +159,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
     }
 
     wasm_link_api(module, proc);
+    wali_link_api(module, runtime, proc);
 
     if (fd_setups && fd_setup_count > 0)
         apply_fd_setup(proc, fd_setups, fd_setup_count);
