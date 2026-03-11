@@ -50,6 +50,10 @@ CFLAGS = -std=gnu99 \
 		 -DBUILD_TIME="\"$(BUILD_TIME)\"" \
 		 -DCOMMIT="\"$(COMMIT)\"" \
 		 -I$(INCLUDEDIR) \
+		 -Iwasm3/source \
+		 -Dd_m3LogTimestamps=0 \
+		 -Dd_m3MaxFunctionStackHeight=500 \
+		 -Dd_m3MaxLinearMemoryPages=1024 \
 		 -fno-stack-protector \
 		 -fno-stack-check \
 		 -fno-PIC \
@@ -96,9 +100,23 @@ LDFLAGS = -T linker.ld -ffreestanding -O2 -nostdlib -lgcc -no-pie
 
 TARGET = $(BUILDDIR)/os.bin
 ISO_TARGET = $(BUILDDIR)/os.iso
+DISK_IMG = disk.img
+DISK_SIZE = 32
+
+# Userspace (WASM) build settings
+WASM_CC = clang
+WASM_CFLAGS = --target=wasm32 -nostdlib -O2
+WASM_LDFLAGS = -Wl,--no-entry -Wl,--allow-undefined
+WASM_SRCDIR = userspace
+WASM_SOURCES = $(wildcard $(WASM_SRCDIR)/*.c)
+WASM_BINARIES = $(patsubst $(WASM_SRCDIR)/%.c,$(BUILDDIR)/wasm/%.wm,$(WASM_SOURCES))
 
 # Find source files
-C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*')
+WASM3_C_SOURCES = ./wasm3/source/m3_bind.c ./wasm3/source/m3_code.c ./wasm3/source/m3_compile.c \
+                  ./wasm3/source/m3_core.c ./wasm3/source/m3_env.c ./wasm3/source/m3_exec.c \
+                  ./wasm3/source/m3_function.c ./wasm3/source/m3_info.c ./wasm3/source/m3_module.c \
+                  ./wasm3/source/m3_parse.c
+C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*' -not -path './userspace/*' -not -path './wasm3/*') $(WASM3_C_SOURCES)
 ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*')
 DATA_SOURCES = $(wildcard data/*)
 RESOURCE_C_SOURCES = $(patsubst data/%,data/%.c,$(filter-out %.c,$(DATA_SOURCES)))
@@ -112,13 +130,25 @@ QEMU_PREFIX = -enable-kvm -machine q35,acpi=on -cpu host -display sdl -serial st
 
 all: $(TARGET)
 
-run: $(ISO_TARGET)
+wasm: $(WASM_BINARIES)
+
+$(BUILDDIR)/wasm/%.wm: $(WASM_SRCDIR)/%.c $(WASM_SRCDIR)/api.h
+	@echo "Compiling WASM $<..."
+	@mkdir -p $(dir $@)
+	$(WASM_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -Wl,--export=_start -o $@ $<
+
+disk: wasm
+	@echo "Creating disk image..."
+	@./buildscripts/mkdisk.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
+	@echo "Disk image created: $(DISK_IMG)"
+
+run: $(ISO_TARGET) wasm disk
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
-run_noaudio: $(TARGET)
+run_noaudio: $(ISO_TARGET) wasm disk
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX)
 
-run_debug: $(TARGET)
+run_debug: $(ISO_TARGET) wasm disk
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -s -S
 
 data/%.c: data/%
@@ -171,6 +201,9 @@ $(ISO_TARGET): $(TARGET)
 clean:
 	rm -rf $(BUILDDIR)
 
+clean_disk:
+	rm -f $(DISK_IMG)
+
 compile_commands:
 	compiledb -o $(BUILDDIR)/compile_commands.json make
 
@@ -179,4 +212,4 @@ format:
 
 rebuild: clean all
 
-.PHONY: all _build clean rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands
+.PHONY: all _build clean clean_disk rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands wasm disk

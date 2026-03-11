@@ -261,3 +261,59 @@ int snprintf(char *str, size_t size, const char *format, ...)
     va_end(ap);
     return written;
 }
+
+int sprintf(char *str, const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    int written = vsnprintf(str, (size_t)-1, format, ap);
+    va_end(ap);
+    return written;
+}
+
+static FILE _stdout_file = {0};
+static FILE _stderr_file = {1};
+FILE *stdout = &_stdout_file;
+FILE *stderr = &_stderr_file;
+
+int fprintf(FILE *stream, const char *format, ...)
+{
+    (void)stream;
+    va_list ap;
+    va_start(ap, format);
+    int written = vprintf(format, ap);
+    va_end(ap);
+    return written;
+}
+
+int fputc(int c, FILE *stream)
+{
+    (void)stream;
+    return putchar(c);
+}
+
+int fputs(const char *s, FILE *stream)
+{
+    (void)stream;
+    while (*s) {
+        putchar(*s++);
+    }
+    return 0;
+}
+
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
+{
+    (void)stream;
+    const unsigned char *p = ptr;
+    size_t total = size * nmemb;
+    for (size_t i = 0; i < total; i++) {
+        putchar(p[i]);
+    }
+    return nmemb;
+}
+
+int fflush(FILE *stream)
+{
+    (void)stream;
+    return 0;
+}

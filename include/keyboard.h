@@ -185,6 +185,56 @@ static const char scancode_map[256] = {
     [KEY_DELETE] = 127,
 };
 
+static const char scancode_shift_map[256] = {
+    [KEY_1] = '!',
+    [KEY_2] = '@',
+    [KEY_3] = '#',
+    [KEY_4] = '$',
+    [KEY_5] = '%',
+    [KEY_6] = '^',
+    [KEY_7] = '&',
+    [KEY_8] = '*',
+    [KEY_9] = '(',
+    [KEY_0] = ')',
+    [KEY_MINUS] = '_',
+    [KEY_EQUAL] = '+',
+    [KEY_Q] = 'Q',
+    [KEY_W] = 'W',
+    [KEY_E] = 'E',
+    [KEY_R] = 'R',
+    [KEY_T] = 'T',
+    [KEY_Y] = 'Y',
+    [KEY_U] = 'U',
+    [KEY_I] = 'I',
+    [KEY_O] = 'O',
+    [KEY_P] = 'P',
+    [KEY_SQBRACKET_LEFT] = '{',
+    [KEY_SQBRACKET_RIGHT] = '}',
+    [KEY_A] = 'A',
+    [KEY_S] = 'S',
+    [KEY_D] = 'D',
+    [KEY_F] = 'F',
+    [KEY_G] = 'G',
+    [KEY_H] = 'H',
+    [KEY_J] = 'J',
+    [KEY_K] = 'K',
+    [KEY_L] = 'L',
+    [KEY_SEMICOLON] = ':',
+    [KEY_SINGLE_QUOTE] = '"',
+    [KEY_BACKTICK] = '~',
+    [KEY_BACKSLASH] = '|',
+    [KEY_Z] = 'Z',
+    [KEY_X] = 'X',
+    [KEY_C] = 'C',
+    [KEY_V] = 'V',
+    [KEY_B] = 'B',
+    [KEY_N] = 'N',
+    [KEY_M] = 'M',
+    [KEY_COMMA] = '<',
+    [KEY_DOT] = '>',
+    [KEY_SLASH] = '?',
+};
+
 void kbd_init();
 void kbd_update_leds();
 void kbd_send_led_cmd(uint8_t data);
@@ -196,3 +246,8 @@ void kbd_dump_modifiers();
 void wait_for_kbd();
 uint8_t kbd_poll_key();
 void kbd_test_leds();
+
+void kbd_buffer_init(void);
+bool kbd_buffer_push(char c);
+bool kbd_buffer_pop(char *c);
+bool kbd_buffer_empty(void);

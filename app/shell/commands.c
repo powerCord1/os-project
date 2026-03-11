@@ -2,6 +2,7 @@
 
 #include <acpi.h>
 #include <ata.h>
+#include <disk.h>
 #include <cmos.h>
 #include <cpu.h>
 #include <debug.h>
@@ -14,6 +15,7 @@
 #include <sound.h>
 #include <stdio.h>
 #include <string.h>
+#include <wasm_runner.h>
 
 static bool daylight_savings_enabled = false;
 
@@ -185,34 +187,34 @@ void cmd_lsblk(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    printf("Disks and Partitions:\n");
-
-    int no_disk_count = 0;
-    for (uint8_t drive = 0; drive < 4; drive++) {
-        if (ata_is_drive_present(drive)) {
-            printf("Drive %d:\n", drive);
-            partition_entry_t partitions[4];
-            ata_read_partition_table(drive, partitions);
-
-            int no_part_count = 0;
-            for (int i = 0; i < 4; i++) {
-                if (partitions[i].num_sectors > 0) {
-                    printf("  Partition %d: Type 0x%x, LBA 0x%x, Sectors %u\n",
-                           i, partitions[i].type, partitions[i].lba_start,
-                           partitions[i].num_sectors);
-                } else {
-                    no_part_count++;
-                }
-            }
-            if (no_part_count == 4) {
-                printf("  No partitions found.\n");
-            }
-        } else {
-            no_disk_count++;
-        }
-    }
-    if (no_disk_count == 4) {
+    int count = disk_get_count();
+    if (count == 0) {
         printf("No disks found.\n");
+        return;
+    }
+
+    printf("Disks and Partitions:\n");
+    for (int i = 0; i < count; i++) {
+        disk_t *d = disk_get(i);
+        printf("Disk %d (%s, %s):\n", i, d->name, d->driver->name);
+
+        partition_entry_t partitions[4];
+        if (!disk_read_partition_table(i, partitions)) {
+            printf("  No partition table found.\n");
+            continue;
+        }
+
+        int found = 0;
+        for (int p = 0; p < 4; p++) {
+            if (partitions[p].num_sectors > 0) {
+                printf("  Partition %d: Type 0x%x, LBA 0x%x, Sectors %u\n",
+                       p, partitions[p].type, partitions[p].lba_start,
+                       partitions[p].num_sectors);
+                found++;
+            }
+        }
+        if (!found)
+            printf("  No partitions found.\n");
     }
 }
 
@@ -228,18 +230,21 @@ void cmd_mount(int argc, char **argv)
         return;
     }
 
-    uint8_t drive = atoi(argv[1]);
-    uint8_t part_num = atoi(argv[2]);
+    int drive = atoi(argv[1]);
+    int part_num = atoi(argv[2]);
 
-    if (drive >= 4 || !ata_is_drive_present(drive)) {
+    if (drive < 0 || drive >= disk_get_count()) {
         printf("Invalid or non-existent drive.\n");
         return;
     }
 
     partition_entry_t partitions[4];
-    ata_read_partition_table(drive, partitions);
+    if (!disk_read_partition_table(drive, partitions)) {
+        printf("No partition table found on disk %d.\n", drive);
+        return;
+    }
 
-    if (part_num >= 4 || partitions[part_num].num_sectors == 0) {
+    if (part_num < 0 || part_num >= 4 || partitions[part_num].num_sectors == 0) {
         printf("Invalid or non-existent partition.\n");
         return;
     }
@@ -492,4 +497,15 @@ void cmd_rmdir(int argc, char **argv)
         printf("Failed to delete directory '%s'.\n", dirname_to_del);
     }
     free((void *)dirname_to_del);
+}
+
+void cmd_wasm(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: wasm <file> [args...]\n");
+        return;
+    }
+    int ret = wasm_run_file(argv[1], argc - 1, argv + 1);
+    if (ret != 0)
+        printf("Exit code: %d\n", ret);
 }

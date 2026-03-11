@@ -1,9 +1,12 @@
 #include <ata.h>
 #include <debug.h>
 #include <disk.h>
+#include <heap.h>
 #include <nvme.h>
+#include <pmm.h>
 #include <sata.h>
 #include <string.h>
+#include <vmm.h>
 
 disk_t disks[MAX_DISKS];
 int disk_count = 0;
@@ -28,13 +31,60 @@ static disk_driver_t ata_driver = {
 
 bool sata_disk_read(disk_t *d, uint64_t lba, uint32_t count, void *buf)
 {
-    return sata_read((hba_port_t *)d->driver_data, lba, count, buf);
+    void *phys = pmm_alloc_page();
+    if (!phys)
+        return false;
+
+    void *dma_buf = phys_to_virt(phys);
+    uint8_t *dst = (uint8_t *)buf;
+    uint32_t remaining = count;
+
+    while (remaining > 0) {
+        uint32_t chunk = remaining > 8 ? 8 : remaining;
+        if (!sata_read((hba_port_t *)d->driver_data, lba, chunk, dma_buf)) {
+            pmm_free_page(phys);
+            return false;
+        }
+        memcpy(dst, dma_buf, chunk * 512);
+        dst += chunk * 512;
+        lba += chunk;
+        remaining -= chunk;
+    }
+
+    pmm_free_page(phys);
+    return true;
+}
+
+bool sata_disk_write(disk_t *d, uint64_t lba, uint32_t count, const void *buf)
+{
+    void *phys = pmm_alloc_page();
+    if (!phys)
+        return false;
+
+    void *dma_buf = phys_to_virt(phys);
+    const uint8_t *src = (const uint8_t *)buf;
+    uint32_t remaining = count;
+
+    while (remaining > 0) {
+        uint32_t chunk = remaining > 8 ? 8 : remaining;
+        memcpy(dma_buf, src, chunk * 512);
+        if (!sata_write((hba_port_t *)d->driver_data, lba, chunk, dma_buf)) {
+            pmm_free_page(phys);
+            return false;
+        }
+        src += chunk * 512;
+        lba += chunk;
+        remaining -= chunk;
+    }
+
+    pmm_free_page(phys);
+    return true;
 }
 
 static disk_driver_t sata_driver = {
     .name = "sata",
     .read_sectors = sata_disk_read,
-    .write_sectors = NULL, // Not implemented yet
+    .write_sectors = sata_disk_write,
 };
 
 static disk_driver_t nvme_driver = {
@@ -99,7 +149,27 @@ bool disk_write(int disk_id, uint64_t lba, uint32_t count, const void *buf)
                                                 buf);
 }
 
+disk_t *disk_get(int id)
+{
+    if (id < 0 || id >= disk_count)
+        return NULL;
+    return &disks[id];
+}
+
 int disk_get_count()
 {
     return disk_count;
+}
+
+bool disk_read_partition_table(int disk_id, partition_entry_t *partitions)
+{
+    uint8_t mbr[512];
+    if (!disk_read(disk_id, 0, 1, mbr))
+        return false;
+
+    if (mbr[510] != 0x55 || mbr[511] != 0xAA)
+        return false;
+
+    memcpy(partitions, &mbr[446], 4 * sizeof(partition_entry_t));
+    return true;
 }

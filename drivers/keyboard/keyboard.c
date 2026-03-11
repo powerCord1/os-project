@@ -12,6 +12,7 @@
 #include <power.h>
 #include <stdio.h>
 #include <timer.h>
+#include <tty.h>
 
 static volatile char last_char = 0;
 static volatile char last_scancode = 0;
@@ -23,6 +24,7 @@ key_t last_key = {0, 0};
 
 void kbd_init()
 {
+    kbd_buffer_init();
     keyboard_logging_enabled = KBD_LOG_DEFAULT;
     log_verbose("Keyboard logging is %s",
                 keyboard_logging_enabled ? "enabled" : "disabled");
@@ -145,6 +147,27 @@ uint64_t keyboard_handler(uint64_t rsp)
         last_scancode = key;
         log_kbd_action("key pressed: 0x%x", key);
 
+        if (!kbd_is_modifier_key(key)) {
+            char ch = last_char;
+            if (kbd_modifiers.caps_lock && ch >= 'a' && ch <= 'z')
+                ch -= 32;
+            tty_t *tty = tty_get(0);
+            if (tty->keyboard_attached) {
+                tty_input_scancode(tty, key, ch,
+                                   kbd_modifiers.ctrl, kbd_modifiers.shift);
+            } else if (ch) {
+                char buf_ch = ch;
+                if (kbd_modifiers.ctrl)
+                    buf_ch = ch & 0x1f;
+                else if (kbd_modifiers.shift) {
+                    char shifted = scancode_shift_map[key];
+                    if (shifted)
+                        buf_ch = shifted;
+                }
+                kbd_buffer_push(buf_ch);
+            }
+        }
+
         switch (key) {
         case KEY_F1:
             break;
@@ -186,8 +209,13 @@ key_t kbd_get_key(bool wait)
     if (kbd_is_modifier_key(last_scancode) || last_key.key == 0) {
         return last_key;
     }
-    if (kbd_modifiers.shift || kbd_modifiers.caps_lock) {
-        last_key.key = kbd_capitalise(last_key.key);
+    if (kbd_modifiers.shift) {
+        char shifted = scancode_shift_map[last_scancode];
+        if (shifted)
+            last_key.key = shifted;
+    } else if (kbd_modifiers.caps_lock) {
+        if (last_key.key >= 'a' && last_key.key <= 'z')
+            last_key.key -= 32;
     }
     return last_key;
 }

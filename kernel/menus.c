@@ -7,6 +7,17 @@
 #include <menus.h>
 #include <power.h>
 #include <tests.h>
+#include <tty.h>
+#include <wasm_runner.h>
+
+static void wasm_init(void)
+{
+    fb_clear();
+    fb_set_cursor(0, 0);
+    tty_sync_from_fb(tty_get(0));
+    char *argv[] = {"init"};
+    wasm_run_file("/INIT.WM", 1, argv);
+}
 
 void main_menu()
 {
@@ -14,6 +25,7 @@ void main_menu()
         {"Typewriter", &typewriter_main},
         {"Key notes", &key_notes_main},
         {"Shell", &shell_main},
+        {"WASM Init", &wasm_init},
         {"Test menu", &test_menu},
     };
     create_menu("Main menu", "Choose an app to launch", apps, ARRAY_SIZE(apps));
