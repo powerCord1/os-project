@@ -10,6 +10,7 @@
 #include <scheduler.h>
 #include <tty.h>
 #include <waitqueue.h>
+#include <procfs.h>
 #include <wasm_api.h>
 #include <wali_defs.h>
 
@@ -635,15 +636,19 @@ static int wali_fd_alloc_from(wasm_process_t *proc, int min_fd)
     return -1;
 }
 
+
 static int64_t wali_do_open(wasm_process_t *proc, const char *pathname, int32_t flags)
 {
-    int fd = wali_fd_alloc(proc);
-    if (fd < 0)
-        return -L_EMFILE;
-
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
+
+    if (strncmp(pathbuf, "/proc/", 6) == 0)
+        return procfs_open(proc, pathbuf);
+
+    int fd = wali_fd_alloc(proc);
+    if (fd < 0)
+        return -L_EMFILE;
 
     uint32_t parent_cluster;
     char *filename = NULL;
@@ -818,6 +823,11 @@ static int64_t wali_do_stat_path(wasm_process_t *proc, const char *pathname,
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
+    if (strncmp(pathbuf, "/proc/", 6) == 0) {
+        wali_fill_stat(st, 0, L_S_IFREG | 0444);
+        return 0;
+    }
+
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
@@ -938,6 +948,9 @@ static int64_t wali_sys_access(wasm_exec_env_t exec_env, int32_t pathname_off,
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
+    if (strncmp(pathbuf, "/proc/", 6) == 0)
+        return 0;
+
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
@@ -962,6 +975,10 @@ static int64_t wali_sys_faccessat(wasm_exec_env_t exec_env, int32_t dirfd,
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
+
+    if (strncmp(pathbuf, "/proc/", 6) == 0)
+        return 0;
+
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {

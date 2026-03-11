@@ -89,6 +89,17 @@ uint8_t *vfs_read_file(uint32_t cluster, const char *filename, uint32_t *size)
                                             size);
 }
 
+uint8_t *vfs_read_file_ex(uint32_t cluster, const char *filename, uint32_t *size,
+                          vfs_progress_fn progress, void *ctx)
+{
+    if (!current_mount)
+        return NULL;
+    if (current_mount->driver->read_file_ex)
+        return current_mount->driver->read_file_ex(current_mount, cluster, filename,
+                                                    size, progress, ctx);
+    return current_mount->driver->read_file(current_mount, cluster, filename, size);
+}
+
 bool vfs_write_file(uint32_t cluster, const char *filename, const uint8_t *data,
                     uint32_t size)
 {

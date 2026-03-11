@@ -14,6 +14,8 @@ typedef enum {
 
 struct vfs_mount;
 
+typedef void (*vfs_progress_fn)(uint32_t bytes_read, uint32_t total, void *ctx);
+
 typedef struct vfs_node {
     char name[256];
     uint32_t size;
@@ -33,6 +35,9 @@ typedef struct fs_driver {
     bool (*create_directory)(struct vfs_mount *mount, uint32_t cluster, const char *dirname);
     bool (*delete_directory)(struct vfs_mount *mount, uint32_t cluster, const char *dirname);
     bool (*resolve_path)(struct vfs_mount *mount, const char *path, uint32_t *parent_cluster, char **filename);
+    uint8_t *(*read_file_ex)(struct vfs_mount *mount, uint32_t cluster,
+                             const char *filename, uint32_t *size,
+                             vfs_progress_fn progress, void *ctx);
 } fs_driver_t;
 
 typedef struct vfs_mount {
@@ -59,3 +64,5 @@ bool vfs_delete_file(uint32_t cluster, const char *filename);
 bool vfs_create_directory(uint32_t cluster, const char *dirname);
 bool vfs_delete_directory(uint32_t cluster, const char *dirname);
 bool vfs_resolve_path(const char *path, uint32_t *parent_cluster, char **filename);
+uint8_t *vfs_read_file_ex(uint32_t cluster, const char *filename, uint32_t *size,
+                          vfs_progress_fn progress, void *ctx);

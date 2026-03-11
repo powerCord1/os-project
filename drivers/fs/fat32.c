@@ -6,6 +6,7 @@
 #include <debug.h>
 #include <disk.h>
 #include <fat32.h>
+#include <fs.h>
 #include <heap.h>
 #include <string.h>
 
@@ -704,8 +705,9 @@ bool fat32_delete_file_internal(vfs_mount_t *mount, uint32_t cluster,
     return true;
 }
 
-uint8_t *fat32_read_file_internal(vfs_mount_t *mount, uint32_t cluster,
-                                  const char *filename, uint32_t *size)
+static uint8_t *fat32_read_file_common(vfs_mount_t *mount, uint32_t cluster,
+                                       const char *filename, uint32_t *size,
+                                       vfs_progress_fn progress, void *ctx)
 {
     fat32_fs_t *fs = (fat32_fs_t *)mount->fs_data;
     fat32_dir_entry_t *file_entry = fat32_find_file(fs, cluster, filename);
@@ -736,12 +738,27 @@ uint8_t *fat32_read_file_internal(vfs_mount_t *mount, uint32_t cluster,
             to_copy = *size - bytes_read;
         memcpy(file_content + bytes_read, buffer, to_copy);
         bytes_read += to_copy;
+        if (progress)
+            progress(bytes_read, *size, ctx);
         current_cluster = fat32_get_next_cluster(fs, current_cluster);
     }
     file_content[*size] = '\0';
     free(buffer);
     free(file_entry);
     return file_content;
+}
+
+uint8_t *fat32_read_file_internal(vfs_mount_t *mount, uint32_t cluster,
+                                  const char *filename, uint32_t *size)
+{
+    return fat32_read_file_common(mount, cluster, filename, size, NULL, NULL);
+}
+
+static uint8_t *fat32_read_file_ex(vfs_mount_t *mount, uint32_t cluster,
+                                   const char *filename, uint32_t *size,
+                                   vfs_progress_fn progress, void *ctx)
+{
+    return fat32_read_file_common(mount, cluster, filename, size, progress, ctx);
 }
 
 bool fat32_create_directory_internal(vfs_mount_t *mount, uint32_t cluster,
@@ -868,7 +885,8 @@ static fs_driver_t fat32_driver = {
     .delete_file = fat32_delete_file_internal,
     .create_directory = fat32_create_directory_internal,
     .delete_directory = fat32_delete_directory_internal,
-    .resolve_path = fat32_resolve_path_internal
+    .resolve_path = fat32_resolve_path_internal,
+    .read_file_ex = fat32_read_file_ex
 };
 
 void fat32_init()

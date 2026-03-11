@@ -10,7 +10,10 @@
 #include <fs.h>
 #include <heap.h>
 #include <panic.h>
+#include <pit.h>
 #include <power.h>
+#include <process.h>
+#include <scheduler.h>
 #include <shell.h>
 #include <sound.h>
 #include <stdio.h>
@@ -499,13 +502,86 @@ void cmd_rmdir(int argc, char **argv)
     free((void *)dirname_to_del);
 }
 
+#define PROGRESS_BAR_WIDTH 20
+
+static void print_progress_bar(uint32_t pct, uint32_t alloc_kb)
+{
+    int filled = (pct * PROGRESS_BAR_WIDTH) / 100;
+    printf("\r[");
+    for (int i = 0; i < PROGRESS_BAR_WIDTH; i++)
+        putchar(i < filled ? '#' : '-');
+    printf("] %u%% %u KB", pct, alloc_kb);
+}
+
 void cmd_wasm(int argc, char **argv)
 {
     if (argc < 2) {
         printf("Usage: wasm <file> [args...]\n");
         return;
     }
-    int ret = wasm_run_file(argv[1], argc - 1, argv + 1);
+
+    uint32_t heap_before = heap_get_used_memory();
+    int32_t pid = wasm_spawn(argv[1], argc - 1, argv + 1, 0);
+    if (pid < 0) {
+        printf("Failed to start '%s'\n", argv[1]);
+        return;
+    }
+
+    proc_entry_t *entry = proc_get(pid);
+    uint64_t last_tick = pit_ticks;
+    bool showed_progress = false;
+
+    while (entry && entry->state != PROC_EXITED) {
+        if (entry->load_done)
+            break;
+        uint64_t now = pit_ticks;
+        if (now - last_tick >= 100) {
+            uint32_t alloc_kb = 0;
+            if (entry->load_heap_used > heap_before)
+                alloc_kb = (entry->load_heap_used - heap_before) / 1024;
+
+            if (entry->load_bytes_total > 0) {
+                uint32_t pct = (entry->load_bytes_read * 100) / entry->load_bytes_total;
+                print_progress_bar(pct, alloc_kb);
+                showed_progress = true;
+            }
+            last_tick = now;
+        }
+        scheduler_yield();
+    }
+
+    if (showed_progress)
+        printf("\n");
+
+    while (entry && entry->state != PROC_EXITED)
+        scheduler_yield();
+
+    int ret = entry ? entry->exit_code : -1;
+    proc_free(pid);
     if (ret != 0)
         printf("Exit code: %d\n", ret);
+}
+
+static void thread_test_func(void *arg)
+{
+    int id = (int)(intptr_t)arg;
+    uint64_t delay = (id == 1) ? 1000 : 500;
+    for (int i = 0; i < 5; i++) {
+        printf("thread %d: %d\n", id, i);
+        uint64_t start = pit_ticks;
+        while (pit_ticks - start < delay)
+            scheduler_yield();
+    }
+    printf("thread %d: done\n", id);
+}
+
+void cmd_threadtest(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    printf("Spawning 2 threads...\n");
+    thread_t *t1 = thread_create(thread_test_func, (void *)(intptr_t)1);
+    thread_t *t2 = thread_create(thread_test_func, (void *)(intptr_t)2);
+    wait_for_thread(t1->id);
+    wait_for_thread(t2->id);
+    printf("All threads finished\n");
 }

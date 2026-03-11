@@ -10,6 +10,7 @@
 #include <framebuffer.h>
 #include <limine_defs.h>
 #include <pipe.h>
+#include <procfs.h>
 #include <tty.h>
 #include <waitqueue.h>
 #include <wasm_api.h>
@@ -243,14 +244,18 @@ static int32_t wasm_api_open(wasm_exec_env_t exec_env, const char *path,
 {
     (void)path_len;
     wasm_process_t *proc = WAMR_PROC(exec_env);
-    int fd = wasm_fd_alloc(proc);
-    if (fd < 0)
-        return -1;
 
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
+
+    if (strncmp(pathbuf, "/proc/", 6) == 0)
+        return procfs_open(proc, pathbuf);
+
+    int fd = wasm_fd_alloc(proc);
+    if (fd < 0)
+        return -1;
 
     uint32_t parent_cluster;
     char *filename = NULL;

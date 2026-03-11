@@ -42,6 +42,11 @@ typedef struct {
 
     volatile uint64_t sig_pending;
 
+    volatile uint32_t load_bytes_read;
+    volatile uint32_t load_bytes_total;
+    volatile uint32_t load_heap_used;
+    volatile bool load_done;
+
     int32_t tracer_pid;
     bool ptrace_syscall;
     ptrace_info_t ptrace_info;

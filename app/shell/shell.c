@@ -44,6 +44,7 @@ const cmd_list_t cmds[] = {
     {"mkdir", &cmd_mkdir},
     {"rmdir", &cmd_rmdir},
     {"wasm", &cmd_wasm},
+    {"threadtest", &cmd_threadtest},
 };
 uint8_t cmd_count;
 bool exit;
