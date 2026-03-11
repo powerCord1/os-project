@@ -201,6 +201,32 @@ void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
     return (void *)(virt_aligned + offset);
 }
 
+void vmm_unmap_page(void *virt_addr)
+{
+    uintptr_t virt = (uintptr_t)virt_addr;
+    size_t pml4_index = (virt >> 39) & 0x1FF;
+    size_t pdpt_index = (virt >> 30) & 0x1FF;
+    size_t pd_index = (virt >> 21) & 0x1FF;
+    size_t pt_index = (virt >> 12) & 0x1FF;
+
+    if (!(pml4[pml4_index] & VMM_PRESENT))
+        return;
+    uint64_t *pdpt =
+        (uint64_t *)phys_to_virt((void *)(pml4[pml4_index] & ~0xFFF));
+
+    if (!(pdpt[pdpt_index] & VMM_PRESENT))
+        return;
+    uint64_t *pd =
+        (uint64_t *)phys_to_virt((void *)(pdpt[pdpt_index] & ~0xFFF));
+
+    if (!(pd[pd_index] & VMM_PRESENT))
+        return;
+    uint64_t *pt = (uint64_t *)phys_to_virt((void *)(pd[pd_index] & ~0xFFF));
+
+    pt[pt_index] = 0;
+    asm volatile("invlpg (%0)" ::"r"(virt_addr));
+}
+
 void *find_free_virt_pages(size_t num_pages)
 {
     // Simple linear search for free virtual address space starting after the
@@ -220,6 +246,7 @@ void *find_free_virt_pages(size_t num_pages)
         }
 
         if (area_free) {
+            search_start = current_addr + num_pages * PAGE_SIZE;
             return (void *)current_addr;
         }
     }

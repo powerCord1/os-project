@@ -123,13 +123,18 @@ WAMR_CFLAGS = -I$(WAMR_CORE)/iwasm/include \
               -DWASM_ENABLE_LIBC_BUILTIN=0 \
               -DWASM_ENABLE_LIBC_WASI=0 \
               -DWASM_ENABLE_BULK_MEMORY=1 \
-              -DWASM_ENABLE_SHARED_MEMORY=0 \
-              -DWASM_ENABLE_THREAD_MGR=0 \
+              -DWASM_ENABLE_SHARED_MEMORY=1 \
+              -DWASM_ENABLE_THREAD_MGR=1 \
+              -DWASM_ENABLE_EXCE_HANDLING=1 \
+              -DWASM_ENABLE_TAGS=1 \
+              -DWASM_ENABLE_REF_TYPES=1 \
+              -DWASM_ENABLE_CALL_INDIRECT_OVERLONG=1 \
               -DWASM_ENABLE_MINI_LOADER=0 \
               -DBH_PLATFORM_MYOS \
               -DBH_MALLOC=wasm_runtime_malloc \
               -DBH_FREE=wasm_runtime_free \
-              -DWASM_ENABLE_BULK_MEMORY_OPT=1
+              -DWASM_ENABLE_BULK_MEMORY_OPT=1 \
+              -I$(WAMR_CORE)/iwasm/libraries/thread-mgr
 
 WAMR_C_SOURCES = \
     $(WAMR_CORE)/iwasm/interpreter/wasm_interp_classic.c \
@@ -141,6 +146,7 @@ WAMR_C_SOURCES = \
     $(WAMR_CORE)/iwasm/common/wasm_memory.c \
     $(WAMR_CORE)/iwasm/common/wasm_loader_common.c \
     $(WAMR_CORE)/iwasm/common/wasm_application.c \
+    $(WAMR_CORE)/iwasm/common/wasm_shared_memory.c \
     $(WAMR_CORE)/shared/utils/bh_assert.c \
     $(WAMR_CORE)/shared/utils/bh_common.c \
     $(WAMR_CORE)/shared/utils/bh_hashmap.c \
@@ -155,6 +161,7 @@ WAMR_C_SOURCES = \
     $(WAMR_CORE)/shared/mem-alloc/ems/ems_hmu.c \
     $(WAMR_CORE)/shared/mem-alloc/ems/ems_kfc.c \
     $(WAMR_CORE)/shared/mem-alloc/ems/ems_gc.c \
+    $(WAMR_CORE)/iwasm/libraries/thread-mgr/thread_manager.c \
     ./drivers/wasm/platform/myos_platform.c \
     ./drivers/wasm/platform/myos_thread.c \
     ./drivers/wasm/platform/myos_time.c

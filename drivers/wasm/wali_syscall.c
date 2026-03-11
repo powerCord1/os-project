@@ -18,7 +18,53 @@
 #define WALI_PROC(exec_env) ((wasm_process_t *)wasm_runtime_get_user_data(exec_env))
 
 #define WASM_PAGE_SIZE 65536
-#define MMAP_REGION_TOP 0xF0000000u
+#define MMAP_BRK_GAP (64 * WASM_PAGE_SIZE)
+
+static void ptrace_notify_entry(wasm_exec_env_t exec_env, int32_t nr,
+                                int64_t a0, int64_t a1, int64_t a2,
+                                int64_t a3, int64_t a4, int64_t a5)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    proc_entry_t *e = proc_get(proc->pid);
+    if (!e || !e->ptrace_syscall) return;
+
+    e->ptrace_info.syscall_nr = nr;
+    e->ptrace_info.args[0] = a0;
+    e->ptrace_info.args[1] = a1;
+    e->ptrace_info.args[2] = a2;
+    e->ptrace_info.args[3] = a3;
+    e->ptrace_info.args[4] = a4;
+    e->ptrace_info.args[5] = a5;
+    e->ptrace_info.at_entry = 1;
+
+    e->state = PROC_STOPPED;
+    waitqueue_wake_one(&e->ptrace_wq);
+    while (e->state == PROC_STOPPED)
+        waitqueue_sleep(&e->exit_wq);
+}
+
+static void ptrace_notify_exit(wasm_exec_env_t exec_env, int64_t ret)
+{
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    proc_entry_t *e = proc_get(proc->pid);
+    if (!e || !e->ptrace_syscall) return;
+
+    e->ptrace_info.ret = ret;
+    e->ptrace_info.at_entry = 0;
+
+    e->state = PROC_STOPPED;
+    waitqueue_wake_one(&e->ptrace_wq);
+    while (e->state == PROC_STOPPED)
+        waitqueue_sleep(&e->exit_wq);
+}
+
+#define PTRACE_ENTER(env, nr, ...) ptrace_notify_entry(env, nr, __VA_ARGS__)
+#define PTRACE_EXIT(env, ret)      ptrace_notify_exit(env, ret)
+#define PTRACE_RETURN(env, val) do { \
+    int64_t _r = (val); \
+    ptrace_notify_exit(env, _r); \
+    return _r; \
+} while (0)
 
 static uint32_t wali_stub_mask[8];
 
@@ -124,20 +170,23 @@ static uint32_t wali_cl_get_argv_len(wasm_exec_env_t exec_env, uint32_t index)
     return (uint32_t)strlen(proc->argv[index]) + 1;
 }
 
-static int32_t wali_cl_copy_argv(wasm_exec_env_t exec_env, char *buf, uint32_t index)
+static int32_t wali_cl_copy_argv(wasm_exec_env_t exec_env, int32_t buf_off, uint32_t index)
 {
     wasm_process_t *proc = WALI_PROC(exec_env);
     if ((int)index >= proc->argc)
+        return -1;
+    char *buf = (char *)wali_get_mem(exec_env, buf_off, 1);
+    if (!buf)
         return -1;
     uint32_t len = strlen(proc->argv[index]);
     memcpy(buf, proc->argv[index], len + 1);
     return 0;
 }
 
-static int32_t wali_get_init_envfile(wasm_exec_env_t exec_env, char *buf, uint32_t bufsize)
+static int32_t wali_get_init_envfile(wasm_exec_env_t exec_env, int32_t buf_off, uint32_t bufsize)
 {
     (void)exec_env;
-    (void)buf;
+    (void)buf_off;
     (void)bufsize;
     return 0;
 }
@@ -250,11 +299,12 @@ static int64_t wali_do_read(wasm_process_t *proc, int32_t fd,
 
 static int64_t wali_sys_brk(wasm_exec_env_t exec_env, uint32_t addr)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
 
     if (proc->brk_addr == 0) {
         proc->brk_addr = wali_memory_size(exec_env);
-        proc->mmap_top = MMAP_REGION_TOP;
+        proc->mmap_top = proc->brk_addr + MMAP_BRK_GAP;
     }
 
     if (addr == 0)
@@ -284,7 +334,7 @@ static int64_t wali_sys_mmap(wasm_exec_env_t exec_env, uint32_t addr,
 
     if (proc->brk_addr == 0) {
         proc->brk_addr = wali_memory_size(exec_env);
-        proc->mmap_top = MMAP_REGION_TOP;
+        proc->mmap_top = proc->brk_addr + MMAP_BRK_GAP;
     }
 
     if (!(flags & L_MAP_ANONYMOUS)) {
@@ -293,16 +343,18 @@ static int64_t wali_sys_mmap(wasm_exec_env_t exec_env, uint32_t addr,
     }
 
     uint32_t aligned_len = (length + WASM_PAGE_SIZE - 1) & ~(WASM_PAGE_SIZE - 1);
-    uint32_t alloc_addr = proc->mmap_top - aligned_len;
+    uint32_t alloc_addr = proc->mmap_top;
 
+    uint32_t end = alloc_addr + aligned_len;
     uint32_t mem_size = wali_memory_size(exec_env);
-    if (alloc_addr + aligned_len > mem_size) {
-        uint32_t pages_needed = (alloc_addr + aligned_len + WASM_PAGE_SIZE - 1) / WASM_PAGE_SIZE;
-        if (!wali_enlarge_memory(exec_env, pages_needed))
+    if (end > mem_size) {
+        uint32_t pages_needed = (end + WASM_PAGE_SIZE - 1) / WASM_PAGE_SIZE;
+        if (!wali_enlarge_memory(exec_env, pages_needed)) {
             return -L_ENOMEM;
+        }
     }
 
-    proc->mmap_top = alloc_addr;
+    proc->mmap_top = end;
 
     wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
     uint8_t *mem = (uint8_t *)wasm_runtime_addr_app_to_native(inst, 0);
@@ -336,6 +388,7 @@ static int64_t wali_sys_madvise(wasm_exec_env_t exec_env, uint32_t addr,
 static int64_t wali_sys_write(wasm_exec_env_t exec_env, int32_t fd,
                                int32_t buf_off, uint32_t count)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     const uint8_t *buf = wali_get_mem(exec_env, buf_off, count);
     if (!buf)
@@ -346,6 +399,7 @@ static int64_t wali_sys_write(wasm_exec_env_t exec_env, int32_t fd,
 static int64_t wali_sys_read(wasm_exec_env_t exec_env, int32_t fd,
                               int32_t buf_off, uint32_t count)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     uint8_t *buf = wali_get_mem(exec_env, buf_off, count);
     if (!buf)
@@ -356,6 +410,7 @@ static int64_t wali_sys_read(wasm_exec_env_t exec_env, int32_t fd,
 static int64_t wali_sys_writev(wasm_exec_env_t exec_env, int32_t fd,
                                 int32_t iov_off, int32_t iovcnt)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     wasm_iovec_t *iov = wali_get_mem(exec_env, iov_off, iovcnt * sizeof(wasm_iovec_t));
     if (!iov)
@@ -417,6 +472,7 @@ static int64_t wali_sys_exit_group(wasm_exec_env_t exec_env, int32_t code)
 
 static int64_t wali_sys_set_tid_address(wasm_exec_env_t exec_env, int32_t tidptr)
 {
+
     (void)tidptr;
     wasm_process_t *proc = WALI_PROC(exec_env);
     return (int64_t)proc->pid;
@@ -425,6 +481,7 @@ static int64_t wali_sys_set_tid_address(wasm_exec_env_t exec_env, int32_t tidptr
 static int64_t wali_sys_rt_sigaction(wasm_exec_env_t exec_env, int32_t signum,
                                       int32_t act, int32_t oldact, uint32_t sigsetsize)
 {
+
     (void)exec_env; (void)signum; (void)act; (void)oldact; (void)sigsetsize;
     return 0;
 }
@@ -432,6 +489,7 @@ static int64_t wali_sys_rt_sigaction(wasm_exec_env_t exec_env, int32_t signum,
 static int64_t wali_sys_rt_sigprocmask(wasm_exec_env_t exec_env, int32_t how,
                                         int32_t set, int32_t oldset, uint32_t sigsetsize)
 {
+
     (void)exec_env; (void)how; (void)set; (void)oldset; (void)sigsetsize;
     return 0;
 }
@@ -611,6 +669,7 @@ static int64_t wali_do_open(wasm_process_t *proc, const char *pathname, int32_t 
 static int64_t wali_sys_open(wasm_exec_env_t exec_env, int32_t pathname_off,
                               int32_t flags, int32_t mode)
 {
+
     (void)mode;
     wasm_process_t *proc = WALI_PROC(exec_env);
     const char *pathname = wali_get_string(exec_env, pathname_off);
@@ -622,6 +681,7 @@ static int64_t wali_sys_open(wasm_exec_env_t exec_env, int32_t pathname_off,
 static int64_t wali_sys_openat(wasm_exec_env_t exec_env, int32_t dirfd,
                                 int32_t pathname_off, int32_t flags, int32_t mode)
 {
+
     (void)mode;
     wasm_process_t *proc = WALI_PROC(exec_env);
     const char *pathname = wali_get_string(exec_env, pathname_off);
@@ -634,6 +694,7 @@ static int64_t wali_sys_openat(wasm_exec_env_t exec_env, int32_t dirfd,
 
 static int64_t wali_sys_close(wasm_exec_env_t exec_env, int32_t fd)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
         return -L_EBADF;
@@ -738,6 +799,7 @@ static int64_t wali_do_stat_path(wasm_process_t *proc, const char *pathname,
 static int64_t wali_sys_stat(wasm_exec_env_t exec_env, int32_t pathname_off,
                               int32_t statbuf_off)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     const char *pathname = wali_get_string(exec_env, pathname_off);
     linux_stat_t *st = wali_get_mem(exec_env, statbuf_off, sizeof(linux_stat_t));
@@ -759,6 +821,7 @@ static int64_t wali_sys_lstat(wasm_exec_env_t exec_env, int32_t pathname_off,
 
 static int64_t wali_sys_fstat(wasm_exec_env_t exec_env, int32_t fd, int32_t statbuf_off)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     linux_stat_t *st = wali_get_mem(exec_env, statbuf_off, sizeof(linux_stat_t));
     if (!st)
@@ -861,6 +924,7 @@ static int64_t wali_sys_faccessat(wasm_exec_env_t exec_env, int32_t dirfd,
 
 static int64_t wali_sys_getcwd(wasm_exec_env_t exec_env, int32_t buf_off, uint32_t size)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     uint32_t len = strlen(proc->cwd) + 1;
     if (size < len)
@@ -897,8 +961,9 @@ static int64_t wali_sys_chdir(wasm_exec_env_t exec_env, int32_t path_off)
 }
 
 static int64_t wali_sys_fcntl(wasm_exec_env_t exec_env, int32_t fd,
-                               int32_t cmd, uint64_t arg)
+                               int32_t cmd, int64_t arg)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
         return -L_EBADF;
@@ -1350,6 +1415,7 @@ static int64_t wali_sys_readlink(wasm_exec_env_t exec_env, int32_t pathname_off,
 static int64_t wali_sys_ioctl(wasm_exec_env_t exec_env, int32_t fd,
                                int32_t request, int32_t argp_off)
 {
+
     wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
         return -L_EBADF;
@@ -1667,6 +1733,7 @@ static int64_t wali_sys_gettimeofday(wasm_exec_env_t exec_env, int32_t tv_off,
 
 static int64_t wali_sys_uname(wasm_exec_env_t exec_env, int32_t buf_off)
 {
+
     linux_utsname_t *u = wali_get_mem(exec_env, buf_off, sizeof(linux_utsname_t));
     if (!u)
         return -L_EFAULT;
@@ -1683,6 +1750,7 @@ static int64_t wali_sys_uname(wasm_exec_env_t exec_env, int32_t buf_off)
 static int64_t wali_sys_getrandom(wasm_exec_env_t exec_env, int32_t buf_off,
                                    uint32_t buflen, int32_t flags)
 {
+
     (void)flags;
     uint8_t *buf = wali_get_mem(exec_env, buf_off, buflen);
     if (!buf)
@@ -1700,6 +1768,7 @@ static int64_t wali_sys_prlimit64(wasm_exec_env_t exec_env, int32_t pid,
                                    int32_t resource, int32_t new_limit_off,
                                    int32_t old_limit_off)
 {
+
     (void)pid; (void)new_limit_off;
     if (old_limit_off) {
         linux_rlimit_t *rl = wali_get_mem(exec_env, old_limit_off, sizeof(linux_rlimit_t));
@@ -1829,12 +1898,446 @@ static int64_t wali_sys_statx(wasm_exec_env_t exec_env, int32_t dirfd,
     return -L_ENOSYS;
 }
 
+static int64_t wali_sys_tkill(wasm_exec_env_t exec_env, int32_t tid, int32_t sig)
+{
+    (void)exec_env; (void)tid; (void)sig;
+    wali_stub_log(SYS_TKILL);
+    return 0;
+}
+
+static int64_t wali_sys_mremap(wasm_exec_env_t exec_env, int32_t old_addr,
+                                int32_t old_size, int32_t new_size,
+                                int32_t flags, int32_t new_addr)
+{
+    (void)exec_env; (void)old_addr; (void)old_size;
+    (void)new_size; (void)flags; (void)new_addr;
+    wali_stub_log(SYS_MREMAP);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_fchdir(wasm_exec_env_t exec_env, int32_t fd)
+{
+    (void)exec_env; (void)fd;
+    wali_stub_log(SYS_FCHDIR);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_execve(wasm_exec_env_t exec_env, int32_t pathname,
+                                int32_t argv, int32_t envp)
+{
+    (void)exec_env; (void)pathname; (void)argv; (void)envp;
+    wali_stub_log(SYS_EXECVE);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_wait4(wasm_exec_env_t exec_env, int32_t pid,
+                               int32_t wstatus_off, int32_t options, int32_t rusage)
+{
+    (void)options; (void)rusage;
+    if (pid <= 0)
+        return -L_EINVAL;
+
+    proc_entry_t *e = proc_get(pid);
+    if (!e)
+        return -L_ESRCH;
+
+    while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
+        waitqueue_sleep(&e->ptrace_wq);
+
+    if (wstatus_off) {
+        int32_t *ws = wali_get_mem(exec_env, wstatus_off, 4);
+        if (ws) {
+            if (e->state == PROC_STOPPED)
+                *ws = (5 << 8) | 0x7f;  /* SIGTRAP stop */
+            else
+                *ws = (e->exit_code << 8);
+        }
+    }
+    return (int64_t)pid;
+}
+
+static int64_t wali_sys_ptrace(wasm_exec_env_t exec_env, int32_t request,
+                                int32_t pid, int32_t addr, int32_t data)
+{
+    (void)addr;
+
+    switch (request) {
+    case PTRACE_SYSCALL: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -L_ESRCH;
+        e->ptrace_syscall = true;
+        if (e->state == PROC_STOPPED) {
+            e->state = PROC_RUNNING;
+            waitqueue_wake_all(&e->exit_wq);
+        }
+        return 0;
+    }
+    case PTRACE_CONT: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -L_ESRCH;
+        e->ptrace_syscall = false;
+        if (e->state == PROC_STOPPED) {
+            e->state = PROC_RUNNING;
+            waitqueue_wake_all(&e->exit_wq);
+        }
+        return 0;
+    }
+    case PTRACE_GETREGS: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -L_ESRCH;
+        ptrace_info_t *info = wali_get_mem(exec_env, data, sizeof(ptrace_info_t));
+        if (!info) return -L_EFAULT;
+        *info = e->ptrace_info;
+        return 0;
+    }
+    default:
+        return -L_EINVAL;
+    }
+}
+
 static int64_t wali_sys_stub(wasm_exec_env_t exec_env)
 {
     (void)exec_env;
     wali_stub_log(-1);
     return -L_ENOSYS;
 }
+
+static int64_t wali_sys_socket(wasm_exec_env_t exec_env, int32_t domain,
+                                int32_t type, int32_t protocol)
+{
+    (void)exec_env; (void)domain; (void)type; (void)protocol;
+    wali_stub_log(SYS_SOCKET);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_connect(wasm_exec_env_t exec_env, int32_t sockfd,
+                                 int32_t addr, int32_t addrlen)
+{
+    (void)exec_env; (void)sockfd; (void)addr; (void)addrlen;
+    wali_stub_log(SYS_CONNECT);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_sendmsg(wasm_exec_env_t exec_env, int32_t sockfd,
+                                 int32_t msg, int32_t flags)
+{
+    (void)exec_env; (void)sockfd; (void)msg; (void)flags;
+    wali_stub_log(SYS_SENDMSG);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_symlink(wasm_exec_env_t exec_env, int32_t target,
+                                 int32_t linkpath)
+{
+    (void)exec_env; (void)target; (void)linkpath;
+    wali_stub_log(SYS_SYMLINK);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_chown(wasm_exec_env_t exec_env, int32_t pathname,
+                               int32_t owner, int32_t group)
+{
+    (void)exec_env; (void)pathname; (void)owner; (void)group;
+    wali_stub_log(SYS_CHOWN);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_fchown(wasm_exec_env_t exec_env, int32_t fd,
+                                int32_t owner, int32_t group)
+{
+    (void)exec_env; (void)fd; (void)owner; (void)group;
+    wali_stub_log(SYS_FCHOWN);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_getrusage(wasm_exec_env_t exec_env, int32_t who,
+                                   int32_t usage)
+{
+    (void)exec_env; (void)who; (void)usage;
+    wali_stub_log(SYS_GETRUSAGE);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_sysinfo(wasm_exec_env_t exec_env, int32_t info)
+{
+    (void)exec_env; (void)info;
+    wali_stub_log(SYS_SYSINFO);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_sched_setscheduler(wasm_exec_env_t exec_env,
+                                            int32_t pid, int32_t policy,
+                                            int32_t param)
+{
+    (void)exec_env; (void)pid; (void)policy; (void)param;
+    wali_stub_log(SYS_SCHED_SETSCHEDULER);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_sched_getaffinity(wasm_exec_env_t exec_env,
+                                           int32_t pid, int32_t cpusetsize,
+                                           int32_t mask)
+{
+    (void)exec_env; (void)pid; (void)cpusetsize; (void)mask;
+    wali_stub_log(SYS_SCHED_GETAFFINITY);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_utimes(wasm_exec_env_t exec_env, int32_t filename,
+                                int32_t times)
+{
+    (void)exec_env; (void)filename; (void)times;
+    wali_stub_log(SYS_UTIMES);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_futimesat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                   int32_t pathname, int32_t times)
+{
+    (void)exec_env; (void)dirfd; (void)pathname; (void)times;
+    wali_stub_log(SYS_FUTIMESAT);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_set_robust_list(wasm_exec_env_t exec_env,
+                                         int32_t head, int32_t len)
+{
+    (void)exec_env; (void)head; (void)len;
+    wali_stub_log(SYS_SET_ROBUST_LIST);
+    return -L_ENOSYS;
+}
+
+static int64_t wali_sys_utimensat(wasm_exec_env_t exec_env, int32_t dirfd,
+                                   int32_t pathname, int32_t times,
+                                   int32_t flags)
+{
+    (void)exec_env; (void)dirfd; (void)pathname; (void)times; (void)flags;
+    wali_stub_log(SYS_UTIMENSAT);
+    return -L_ENOSYS;
+}
+
+/* Traced wrappers: notify ptrace at syscall entry and exit */
+
+#define DEF_TRACED_0(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e) { \
+        PTRACE_ENTER(e,nr,0,0,0,0,0,0); \
+        int64_t r=fn(e); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_1(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0) { \
+        PTRACE_ENTER(e,nr,a0,0,0,0,0,0); \
+        int64_t r=fn(e,a0); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_1u(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, uint32_t a0) { \
+        PTRACE_ENTER(e,nr,a0,0,0,0,0,0); \
+        int64_t r=fn(e,a0); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_2(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1) { \
+        PTRACE_ENTER(e,nr,a0,a1,0,0,0,0); \
+        int64_t r=fn(e,a0,a1); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_2ui(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, uint32_t a0, int32_t a1) { \
+        PTRACE_ENTER(e,nr,a0,a1,0,0,0,0); \
+        int64_t r=fn(e,a0,a1); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_2iu(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint32_t a1) { \
+        PTRACE_ENTER(e,nr,a0,a1,0,0,0,0); \
+        int64_t r=fn(e,a0,a1); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_2uu(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, uint32_t a0, uint32_t a1) { \
+        PTRACE_ENTER(e,nr,a0,a1,0,0,0,0); \
+        int64_t r=fn(e,a0,a1); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_3(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, int32_t a2) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,0,0,0); \
+        int64_t r=fn(e,a0,a1,a2); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_3iiu(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, uint32_t a2) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,0,0,0); \
+        int64_t r=fn(e,a0,a1,a2); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_3iui(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint32_t a1, int32_t a2) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,0,0,0); \
+        int64_t r=fn(e,a0,a1,a2); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_3_lseek(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int64_t a1, int32_t a2) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,0,0,0); \
+        int64_t r=fn(e,a0,a1,a2); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_3_poll(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint64_t a1, int32_t a2) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,0,0,0); \
+        int64_t r=fn(e,a0,a1,a2); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_3_fcntl(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, int64_t a2) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,0,0,0); \
+        int64_t r=fn(e,a0,a1,a2); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_4(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, int32_t a2, int32_t a3) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,0,0); \
+        int64_t r=fn(e,a0,a1,a2,a3); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_4_iuiI(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint32_t a1, int32_t a2, int64_t a3) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,0,0); \
+        int64_t r=fn(e,a0,a1,a2,a3); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_4_iiuI(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, uint32_t a2, int64_t a3) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,0,0); \
+        int64_t r=fn(e,a0,a1,a2,a3); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_4_iIIi(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int64_t a1, int64_t a2, int32_t a3) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,0,0); \
+        int64_t r=fn(e,a0,a1,a2,a3); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_4_iuiI2(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint32_t a1, int32_t a2, uint32_t a3) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,0,0); \
+        int64_t r=fn(e,a0,a1,a2,a3); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_5(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, int32_t a2, int32_t a3, int32_t a4) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,a4,0); \
+        int64_t r=fn(e,a0,a1,a2,a3,a4); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_5_ppoll(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint64_t a1, int32_t a2, int32_t a3, uint32_t a4) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,a4,0); \
+        int64_t r=fn(e,a0,a1,a2,a3,a4); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_5_prctl(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,a4,0); \
+        int64_t r=fn(e,a0,a1,a2,a3,a4); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_6(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int32_t a1, int32_t a2, int32_t a3, int32_t a4, int32_t a5) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,a4,a5); \
+        int64_t r=fn(e,a0,a1,a2,a3,a4,a5); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_6_mmap(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, uint32_t a0, uint32_t a1, int32_t a2, int32_t a3, int32_t a4, int64_t a5) { \
+        PTRACE_ENTER(e,nr,a0,a1,a2,a3,a4,a5); \
+        int64_t r=fn(e,a0,a1,a2,a3,a4,a5); PTRACE_EXIT(e,r); return r; }
+
+#define DEF_TRACED_2_iI(fn, nr) \
+    static int64_t fn##_pt(wasm_exec_env_t e, int32_t a0, int64_t a1) { \
+        PTRACE_ENTER(e,nr,a0,a1,0,0,0,0); \
+        int64_t r=fn(e,a0,a1); PTRACE_EXIT(e,r); return r; }
+
+DEF_TRACED_3iiu(wali_sys_read, SYS_READ)
+DEF_TRACED_3iiu(wali_sys_write, SYS_WRITE)
+DEF_TRACED_3(wali_sys_open, SYS_OPEN)
+DEF_TRACED_1(wali_sys_close, SYS_CLOSE)
+DEF_TRACED_2(wali_sys_stat, SYS_STAT)
+DEF_TRACED_2(wali_sys_fstat, SYS_FSTAT)
+DEF_TRACED_2(wali_sys_lstat, SYS_LSTAT)
+DEF_TRACED_3_poll(wali_sys_poll, SYS_POLL)
+DEF_TRACED_3_lseek(wali_sys_lseek, SYS_LSEEK)
+DEF_TRACED_6_mmap(wali_sys_mmap, SYS_MMAP)
+DEF_TRACED_3(wali_sys_mprotect, SYS_MPROTECT)
+DEF_TRACED_2uu(wali_sys_munmap, SYS_MUNMAP)
+DEF_TRACED_1u(wali_sys_brk, SYS_BRK)
+DEF_TRACED_4(wali_sys_rt_sigaction, SYS_RT_SIGACTION)
+DEF_TRACED_4(wali_sys_rt_sigprocmask, SYS_RT_SIGPROCMASK)
+DEF_TRACED_3(wali_sys_ioctl, SYS_IOCTL)
+DEF_TRACED_4_iiuI(wali_sys_pread64, SYS_PREAD64)
+DEF_TRACED_4_iiuI(wali_sys_pwrite64, SYS_PWRITE64)
+DEF_TRACED_3(wali_sys_readv, SYS_READV)
+DEF_TRACED_3(wali_sys_writev, SYS_WRITEV)
+DEF_TRACED_2(wali_sys_access, SYS_ACCESS)
+DEF_TRACED_1(wali_sys_pipe, SYS_PIPE)
+DEF_TRACED_0(wali_sys_sched_yield, SYS_SCHED_YIELD)
+DEF_TRACED_3(wali_sys_madvise, SYS_MADVISE)
+DEF_TRACED_1(wali_sys_dup, SYS_DUP)
+DEF_TRACED_2(wali_sys_dup2, SYS_DUP2)
+DEF_TRACED_2(wali_sys_nanosleep, SYS_NANOSLEEP)
+DEF_TRACED_0(wali_sys_getpid, SYS_GETPID)
+DEF_TRACED_1(wali_sys_exit, SYS_EXIT)
+DEF_TRACED_2(wali_sys_kill, SYS_KILL)
+DEF_TRACED_1(wali_sys_uname, SYS_UNAME)
+DEF_TRACED_3_fcntl(wali_sys_fcntl, SYS_FCNTL)
+DEF_TRACED_2(wali_sys_flock, SYS_FLOCK)
+DEF_TRACED_1(wali_sys_fsync, SYS_FSYNC)
+DEF_TRACED_2_iI(wali_sys_ftruncate, SYS_FTRUNCATE)
+DEF_TRACED_2iu(wali_sys_getcwd, SYS_GETCWD)
+DEF_TRACED_1(wali_sys_chdir, SYS_CHDIR)
+DEF_TRACED_2(wali_sys_rename, SYS_RENAME)
+DEF_TRACED_2(wali_sys_mkdir, SYS_MKDIR)
+DEF_TRACED_1(wali_sys_rmdir, SYS_RMDIR)
+DEF_TRACED_1(wali_sys_unlink, SYS_UNLINK)
+DEF_TRACED_3iui(wali_sys_readlink, SYS_READLINK)
+DEF_TRACED_2(wali_sys_chmod, SYS_CHMOD)
+DEF_TRACED_2(wali_sys_fchmod, SYS_FCHMOD)
+DEF_TRACED_1(wali_sys_umask, SYS_UMASK)
+DEF_TRACED_2(wali_sys_gettimeofday, SYS_GETTIMEOFDAY)
+DEF_TRACED_2(wali_sys_getrlimit, SYS_GETRLIMIT)
+DEF_TRACED_0(wali_sys_getuid, SYS_GETUID)
+DEF_TRACED_0(wali_sys_getgid, SYS_GETGID)
+DEF_TRACED_1(wali_sys_setuid, SYS_SETUID)
+DEF_TRACED_1(wali_sys_setgid, SYS_SETGID)
+DEF_TRACED_0(wali_sys_geteuid, SYS_GETEUID)
+DEF_TRACED_0(wali_sys_getegid, SYS_GETEGID)
+DEF_TRACED_2(wali_sys_setpgid, SYS_SETPGID)
+DEF_TRACED_0(wali_sys_getppid, SYS_GETPPID)
+DEF_TRACED_0(wali_sys_setsid, SYS_SETSID)
+DEF_TRACED_1(wali_sys_getpgid, SYS_GETPGID)
+DEF_TRACED_2(wali_sys_sigaltstack, SYS_SIGALTSTACK)
+DEF_TRACED_5_prctl(wali_sys_prctl, SYS_PRCTL)
+DEF_TRACED_0(wali_sys_gettid, SYS_GETTID)
+DEF_TRACED_6(wali_sys_futex, SYS_FUTEX)
+DEF_TRACED_3(wali_sys_getdents64, SYS_GETDENTS64)
+DEF_TRACED_1(wali_sys_set_tid_address, SYS_SET_TID_ADDRESS)
+DEF_TRACED_4_iIIi(wali_sys_fadvise, SYS_FADVISE)
+DEF_TRACED_2(wali_sys_clock_gettime, SYS_CLOCK_GETTIME)
+DEF_TRACED_2(wali_sys_clock_getres, SYS_CLOCK_GETRES)
+DEF_TRACED_4(wali_sys_clock_nanosleep, SYS_CLOCK_NANOSLEEP)
+DEF_TRACED_1(wali_sys_exit_group, SYS_EXIT_GROUP)
+DEF_TRACED_4(wali_sys_openat, SYS_OPENAT)
+DEF_TRACED_3(wali_sys_mkdirat, SYS_MKDIRAT)
+DEF_TRACED_4(wali_sys_newfstatat, SYS_NEWFSTATAT)
+DEF_TRACED_3(wali_sys_unlinkat, SYS_UNLINKAT)
+DEF_TRACED_5(wali_sys_renameat2, SYS_RENAMEAT2)
+DEF_TRACED_4(wali_sys_faccessat, SYS_FACCESSAT)
+DEF_TRACED_3(wali_sys_dup3, SYS_DUP3)
+DEF_TRACED_2(wali_sys_pipe2, SYS_PIPE2)
+DEF_TRACED_4(wali_sys_prlimit64, SYS_PRLIMIT64)
+DEF_TRACED_5_ppoll(wali_sys_ppoll, SYS_PPOLL)
+DEF_TRACED_3iui(wali_sys_getrandom, SYS_GETRANDOM)
+DEF_TRACED_5(wali_sys_statx, SYS_STATX)
+DEF_TRACED_2(wali_sys_tkill, SYS_TKILL)
+DEF_TRACED_5(wali_sys_mremap, SYS_MREMAP)
+DEF_TRACED_1(wali_sys_fchdir, SYS_FCHDIR)
+DEF_TRACED_3(wali_sys_execve, SYS_EXECVE)
+DEF_TRACED_4(wali_sys_wait4, SYS_WAIT4)
+DEF_TRACED_3(wali_sys_socket, SYS_SOCKET)
+DEF_TRACED_3(wali_sys_connect, SYS_CONNECT)
+DEF_TRACED_3(wali_sys_sendmsg, SYS_SENDMSG)
+DEF_TRACED_2(wali_sys_symlink, SYS_SYMLINK)
+DEF_TRACED_3(wali_sys_chown, SYS_CHOWN)
+DEF_TRACED_3(wali_sys_fchown, SYS_FCHOWN)
+DEF_TRACED_2(wali_sys_getrusage, SYS_GETRUSAGE)
+DEF_TRACED_1(wali_sys_sysinfo, SYS_SYSINFO)
+DEF_TRACED_3(wali_sys_sched_setscheduler, SYS_SCHED_SETSCHEDULER)
+DEF_TRACED_3(wali_sys_sched_getaffinity, SYS_SCHED_GETAFFINITY)
+DEF_TRACED_2(wali_sys_utimes, SYS_UTIMES)
+DEF_TRACED_3(wali_sys_futimesat, SYS_FUTIMESAT)
+DEF_TRACED_2(wali_sys_set_robust_list, SYS_SET_ROBUST_LIST)
+DEF_TRACED_4(wali_sys_utimensat, SYS_UTIMENSAT)
+DEF_TRACED_4(wali_sys_ptrace, SYS_PTRACE)
 
 static NativeSymbol wali_symbols[] = {
     /* Aux functions */
@@ -1843,96 +2346,116 @@ static NativeSymbol wali_symbols[] = {
     { "__proc_exit",        (void *)wali_proc_exit,         "(i)",          NULL },
     { "__cl_get_argc",      (void *)wali_cl_get_argc,       "()i",          NULL },
     { "__cl_get_argv_len",  (void *)wali_cl_get_argv_len,   "(i)i",         NULL },
-    { "__cl_copy_argv",     (void *)wali_cl_copy_argv,      "(*i)i",        NULL },
-    { "__get_init_envfile", (void *)wali_get_init_envfile,   "(*i)i",        NULL },
+    { "__cl_copy_argv",     (void *)wali_cl_copy_argv,      "(ii)i",        NULL },
+    { "__get_init_envfile", (void *)wali_get_init_envfile,   "(ii)i",        NULL },
     { "sigsetjmp",          (void *)wali_sigsetjmp,         "(ii)i",        NULL },
     { "setjmp",             (void *)wali_setjmp,            "(i)i",         NULL },
     { "longjmp",            (void *)wali_longjmp,           "(ii)",         NULL },
     { "__wasm_thread_spawn",(void *)wali_thread_spawn,      "(ii)i",        NULL },
 
-    /* Syscalls */
-    { "SYS_read",           (void *)wali_sys_read,          "(iii)I",       NULL },
-    { "SYS_write",          (void *)wali_sys_write,         "(iii)I",       NULL },
-    { "SYS_open",           (void *)wali_sys_open,          "(iii)I",       NULL },
-    { "SYS_close",          (void *)wali_sys_close,         "(i)I",         NULL },
-    { "SYS_stat",           (void *)wali_sys_stat,          "(ii)I",        NULL },
-    { "SYS_fstat",          (void *)wali_sys_fstat,         "(ii)I",        NULL },
-    { "SYS_lstat",          (void *)wali_sys_lstat,         "(ii)I",        NULL },
-    { "SYS_poll",           (void *)wali_sys_poll,          "(iIi)I",       NULL },
-    { "SYS_lseek",          (void *)wali_sys_lseek,         "(iIi)I",       NULL },
-    { "SYS_mmap",           (void *)wali_sys_mmap,          "(iiiiiI)I",    NULL },
-    { "SYS_mprotect",       (void *)wali_sys_mprotect,      "(iii)I",       NULL },
-    { "SYS_munmap",         (void *)wali_sys_munmap,        "(ii)I",        NULL },
-    { "SYS_brk",            (void *)wali_sys_brk,           "(i)I",         NULL },
-    { "SYS_rt_sigaction",   (void *)wali_sys_rt_sigaction,  "(iiii)I",      NULL },
-    { "SYS_rt_sigprocmask", (void *)wali_sys_rt_sigprocmask,"(iiii)I",     NULL },
-    { "SYS_ioctl",          (void *)wali_sys_ioctl,         "(iii)I",       NULL },
-    { "SYS_pread64",        (void *)wali_sys_pread64,       "(iiiI)I",      NULL },
-    { "SYS_pwrite64",       (void *)wali_sys_pwrite64,      "(iiiI)I",      NULL },
-    { "SYS_readv",          (void *)wali_sys_readv,         "(iii)I",       NULL },
-    { "SYS_writev",         (void *)wali_sys_writev,        "(iii)I",       NULL },
-    { "SYS_access",         (void *)wali_sys_access,        "(ii)I",        NULL },
-    { "SYS_pipe",           (void *)wali_sys_pipe,          "(i)I",         NULL },
-    { "SYS_sched_yield",    (void *)wali_sys_sched_yield,   "()I",          NULL },
-    { "SYS_madvise",        (void *)wali_sys_madvise,       "(iii)I",       NULL },
-    { "SYS_dup",            (void *)wali_sys_dup,           "(i)I",         NULL },
-    { "SYS_dup2",           (void *)wali_sys_dup2,          "(ii)I",        NULL },
-    { "SYS_nanosleep",      (void *)wali_sys_nanosleep,     "(ii)I",        NULL },
-    { "SYS_getpid",         (void *)wali_sys_getpid,        "()I",          NULL },
-    { "SYS_exit",           (void *)wali_sys_exit,          "(i)I",         NULL },
-    { "SYS_kill",           (void *)wali_sys_kill,          "(ii)I",        NULL },
-    { "SYS_uname",          (void *)wali_sys_uname,         "(i)I",         NULL },
-    { "SYS_fcntl",          (void *)wali_sys_fcntl,         "(iiI)I",       NULL },
-    { "SYS_flock",          (void *)wali_sys_flock,         "(ii)I",        NULL },
-    { "SYS_fsync",          (void *)wali_sys_fsync,         "(i)I",         NULL },
-    { "SYS_fdatasync",      (void *)wali_sys_fsync,         "(i)I",         NULL },
-    { "SYS_ftruncate",      (void *)wali_sys_ftruncate,     "(iI)I",        NULL },
-    { "SYS_getcwd",         (void *)wali_sys_getcwd,        "(ii)I",        NULL },
-    { "SYS_chdir",          (void *)wali_sys_chdir,         "(i)I",         NULL },
-    { "SYS_rename",         (void *)wali_sys_rename,        "(ii)I",        NULL },
-    { "SYS_mkdir",          (void *)wali_sys_mkdir,         "(ii)I",        NULL },
-    { "SYS_rmdir",          (void *)wali_sys_rmdir,         "(i)I",         NULL },
-    { "SYS_unlink",         (void *)wali_sys_unlink,        "(i)I",         NULL },
-    { "SYS_readlink",       (void *)wali_sys_readlink,      "(iii)I",       NULL },
-    { "SYS_chmod",          (void *)wali_sys_chmod,         "(ii)I",        NULL },
-    { "SYS_fchmod",         (void *)wali_sys_fchmod,        "(ii)I",        NULL },
-    { "SYS_umask",          (void *)wali_sys_umask,         "(i)I",         NULL },
-    { "SYS_gettimeofday",   (void *)wali_sys_gettimeofday,  "(ii)I",        NULL },
-    { "SYS_getrlimit",      (void *)wali_sys_getrlimit,     "(ii)I",        NULL },
-    { "SYS_getuid",         (void *)wali_sys_getuid,        "()I",          NULL },
-    { "SYS_getgid",         (void *)wali_sys_getgid,        "()I",          NULL },
-    { "SYS_setuid",         (void *)wali_sys_setuid,        "(i)I",         NULL },
-    { "SYS_setgid",         (void *)wali_sys_setgid,        "(i)I",         NULL },
-    { "SYS_geteuid",        (void *)wali_sys_geteuid,       "()I",          NULL },
-    { "SYS_getegid",        (void *)wali_sys_getegid,       "()I",          NULL },
-    { "SYS_setpgid",        (void *)wali_sys_setpgid,       "(ii)I",        NULL },
-    { "SYS_getppid",        (void *)wali_sys_getppid,       "()I",          NULL },
-    { "SYS_setsid",         (void *)wali_sys_setsid,        "()I",          NULL },
-    { "SYS_getpgid",        (void *)wali_sys_getpgid,       "(i)I",         NULL },
-    { "SYS_sigaltstack",    (void *)wali_sys_sigaltstack,   "(ii)I",        NULL },
-    { "SYS_prctl",          (void *)wali_sys_prctl,         "(iIIII)I",     NULL },
-    { "SYS_gettid",         (void *)wali_sys_gettid,        "()I",          NULL },
-    { "SYS_futex",          (void *)wali_sys_futex,         "(iiiiii)I",    NULL },
-    { "SYS_getdents64",     (void *)wali_sys_getdents64,    "(iii)I",       NULL },
-    { "SYS_set_tid_address",(void *)wali_sys_set_tid_address,"(i)I",        NULL },
-    { "SYS_fadvise",        (void *)wali_sys_fadvise,       "(iIIi)I",      NULL },
-    { "SYS_clock_gettime",  (void *)wali_sys_clock_gettime, "(ii)I",        NULL },
-    { "SYS_clock_getres",   (void *)wali_sys_clock_getres,  "(ii)I",        NULL },
-    { "SYS_clock_nanosleep",(void *)wali_sys_clock_nanosleep,"(iiii)I",     NULL },
-    { "SYS_exit_group",     (void *)wali_sys_exit_group,    "(i)I",         NULL },
-    { "SYS_openat",         (void *)wali_sys_openat,        "(iiii)I",      NULL },
-    { "SYS_mkdirat",        (void *)wali_sys_mkdirat,       "(iii)I",       NULL },
-    { "SYS_newfstatat",     (void *)wali_sys_newfstatat,    "(iiii)I",      NULL },
-    { "SYS_unlinkat",       (void *)wali_sys_unlinkat,      "(iii)I",       NULL },
-    { "SYS_renameat2",      (void *)wali_sys_renameat2,     "(iiiii)I",     NULL },
-    { "SYS_faccessat",      (void *)wali_sys_faccessat,     "(iiii)I",      NULL },
-    { "SYS_faccessat2",     (void *)wali_sys_faccessat,     "(iiii)I",      NULL },
-    { "SYS_dup3",           (void *)wali_sys_dup3,          "(iii)I",       NULL },
-    { "SYS_pipe2",          (void *)wali_sys_pipe2,         "(ii)I",        NULL },
-    { "SYS_prlimit64",      (void *)wali_sys_prlimit64,     "(iiii)I",      NULL },
-    { "SYS_ppoll",          (void *)wali_sys_ppoll,         "(iIiii)I",     NULL },
-    { "SYS_getrandom",      (void *)wali_sys_getrandom,     "(iii)I",       NULL },
-    { "SYS_statx",          (void *)wali_sys_statx,         "(iiiii)I",     NULL },
+    /* Syscalls (traced via ptrace wrappers) */
+    { "SYS_read",           (void *)wali_sys_read_pt,          "(iii)I",       NULL },
+    { "SYS_write",          (void *)wali_sys_write_pt,         "(iii)I",       NULL },
+    { "SYS_open",           (void *)wali_sys_open_pt,          "(iii)I",       NULL },
+    { "SYS_close",          (void *)wali_sys_close_pt,         "(i)I",         NULL },
+    { "SYS_stat",           (void *)wali_sys_stat_pt,          "(ii)I",        NULL },
+    { "SYS_fstat",          (void *)wali_sys_fstat_pt,         "(ii)I",        NULL },
+    { "SYS_lstat",          (void *)wali_sys_lstat_pt,         "(ii)I",        NULL },
+    { "SYS_poll",           (void *)wali_sys_poll_pt,          "(iIi)I",       NULL },
+    { "SYS_lseek",          (void *)wali_sys_lseek_pt,         "(iIi)I",       NULL },
+    { "SYS_mmap",           (void *)wali_sys_mmap_pt,          "(iiiiiI)I",    NULL },
+    { "SYS_mprotect",       (void *)wali_sys_mprotect_pt,      "(iii)I",       NULL },
+    { "SYS_munmap",         (void *)wali_sys_munmap_pt,        "(ii)I",        NULL },
+    { "SYS_brk",            (void *)wali_sys_brk_pt,           "(i)I",         NULL },
+    { "SYS_rt_sigaction",   (void *)wali_sys_rt_sigaction_pt,  "(iiii)I",      NULL },
+    { "SYS_rt_sigprocmask", (void *)wali_sys_rt_sigprocmask_pt,"(iiii)I",     NULL },
+    { "SYS_ioctl",          (void *)wali_sys_ioctl_pt,         "(iii)I",       NULL },
+    { "SYS_pread64",        (void *)wali_sys_pread64_pt,       "(iiiI)I",      NULL },
+    { "SYS_pwrite64",       (void *)wali_sys_pwrite64_pt,      "(iiiI)I",      NULL },
+    { "SYS_readv",          (void *)wali_sys_readv_pt,         "(iii)I",       NULL },
+    { "SYS_writev",         (void *)wali_sys_writev_pt,        "(iii)I",       NULL },
+    { "SYS_access",         (void *)wali_sys_access_pt,        "(ii)I",        NULL },
+    { "SYS_pipe",           (void *)wali_sys_pipe_pt,          "(i)I",         NULL },
+    { "SYS_sched_yield",    (void *)wali_sys_sched_yield_pt,   "()I",          NULL },
+    { "SYS_madvise",        (void *)wali_sys_madvise_pt,       "(iii)I",       NULL },
+    { "SYS_dup",            (void *)wali_sys_dup_pt,           "(i)I",         NULL },
+    { "SYS_dup2",           (void *)wali_sys_dup2_pt,          "(ii)I",        NULL },
+    { "SYS_nanosleep",      (void *)wali_sys_nanosleep_pt,     "(ii)I",        NULL },
+    { "SYS_getpid",         (void *)wali_sys_getpid_pt,        "()I",          NULL },
+    { "SYS_exit",           (void *)wali_sys_exit_pt,          "(i)I",         NULL },
+    { "SYS_kill",           (void *)wali_sys_kill_pt,          "(ii)I",        NULL },
+    { "SYS_uname",          (void *)wali_sys_uname_pt,         "(i)I",         NULL },
+    { "SYS_fcntl",          (void *)wali_sys_fcntl_pt,         "(iiI)I",       NULL },
+    { "SYS_flock",          (void *)wali_sys_flock_pt,         "(ii)I",        NULL },
+    { "SYS_fsync",          (void *)wali_sys_fsync_pt,         "(i)I",         NULL },
+    { "SYS_fdatasync",      (void *)wali_sys_fsync_pt,         "(i)I",         NULL },
+    { "SYS_ftruncate",      (void *)wali_sys_ftruncate_pt,     "(iI)I",        NULL },
+    { "SYS_getcwd",         (void *)wali_sys_getcwd_pt,        "(ii)I",        NULL },
+    { "SYS_chdir",          (void *)wali_sys_chdir_pt,         "(i)I",         NULL },
+    { "SYS_rename",         (void *)wali_sys_rename_pt,        "(ii)I",        NULL },
+    { "SYS_mkdir",          (void *)wali_sys_mkdir_pt,         "(ii)I",        NULL },
+    { "SYS_rmdir",          (void *)wali_sys_rmdir_pt,         "(i)I",         NULL },
+    { "SYS_unlink",         (void *)wali_sys_unlink_pt,        "(i)I",         NULL },
+    { "SYS_readlink",       (void *)wali_sys_readlink_pt,      "(iii)I",       NULL },
+    { "SYS_chmod",          (void *)wali_sys_chmod_pt,         "(ii)I",        NULL },
+    { "SYS_fchmod",         (void *)wali_sys_fchmod_pt,        "(ii)I",        NULL },
+    { "SYS_umask",          (void *)wali_sys_umask_pt,         "(i)I",         NULL },
+    { "SYS_gettimeofday",   (void *)wali_sys_gettimeofday_pt,  "(ii)I",        NULL },
+    { "SYS_getrlimit",      (void *)wali_sys_getrlimit_pt,     "(ii)I",        NULL },
+    { "SYS_getuid",         (void *)wali_sys_getuid_pt,        "()I",          NULL },
+    { "SYS_getgid",         (void *)wali_sys_getgid_pt,        "()I",          NULL },
+    { "SYS_setuid",         (void *)wali_sys_setuid_pt,        "(i)I",         NULL },
+    { "SYS_setgid",         (void *)wali_sys_setgid_pt,        "(i)I",         NULL },
+    { "SYS_geteuid",        (void *)wali_sys_geteuid_pt,       "()I",          NULL },
+    { "SYS_getegid",        (void *)wali_sys_getegid_pt,       "()I",          NULL },
+    { "SYS_setpgid",        (void *)wali_sys_setpgid_pt,       "(ii)I",        NULL },
+    { "SYS_getppid",        (void *)wali_sys_getppid_pt,       "()I",          NULL },
+    { "SYS_setsid",         (void *)wali_sys_setsid_pt,        "()I",          NULL },
+    { "SYS_getpgid",        (void *)wali_sys_getpgid_pt,       "(i)I",         NULL },
+    { "SYS_sigaltstack",    (void *)wali_sys_sigaltstack_pt,   "(ii)I",        NULL },
+    { "SYS_prctl",          (void *)wali_sys_prctl_pt,         "(iIIII)I",     NULL },
+    { "SYS_gettid",         (void *)wali_sys_gettid_pt,        "()I",          NULL },
+    { "SYS_futex",          (void *)wali_sys_futex_pt,         "(iiiiii)I",    NULL },
+    { "SYS_getdents64",     (void *)wali_sys_getdents64_pt,    "(iii)I",       NULL },
+    { "SYS_set_tid_address",(void *)wali_sys_set_tid_address_pt,"(i)I",        NULL },
+    { "SYS_fadvise",        (void *)wali_sys_fadvise_pt,       "(iIIi)I",      NULL },
+    { "SYS_clock_gettime",  (void *)wali_sys_clock_gettime_pt, "(ii)I",        NULL },
+    { "SYS_clock_getres",   (void *)wali_sys_clock_getres_pt,  "(ii)I",        NULL },
+    { "SYS_clock_nanosleep",(void *)wali_sys_clock_nanosleep_pt,"(iiii)I",     NULL },
+    { "SYS_exit_group",     (void *)wali_sys_exit_group_pt,    "(i)I",         NULL },
+    { "SYS_openat",         (void *)wali_sys_openat_pt,        "(iiii)I",      NULL },
+    { "SYS_mkdirat",        (void *)wali_sys_mkdirat_pt,       "(iii)I",       NULL },
+    { "SYS_newfstatat",     (void *)wali_sys_newfstatat_pt,    "(iiii)I",      NULL },
+    { "SYS_unlinkat",       (void *)wali_sys_unlinkat_pt,      "(iii)I",       NULL },
+    { "SYS_renameat2",      (void *)wali_sys_renameat2_pt,     "(iiiii)I",     NULL },
+    { "SYS_faccessat",      (void *)wali_sys_faccessat_pt,     "(iiii)I",      NULL },
+    { "SYS_faccessat2",     (void *)wali_sys_faccessat_pt,     "(iiii)I",      NULL },
+    { "SYS_dup3",           (void *)wali_sys_dup3_pt,          "(iii)I",       NULL },
+    { "SYS_pipe2",          (void *)wali_sys_pipe2_pt,         "(ii)I",        NULL },
+    { "SYS_prlimit64",      (void *)wali_sys_prlimit64_pt,     "(iiii)I",      NULL },
+    { "SYS_ppoll",          (void *)wali_sys_ppoll_pt,         "(iIiii)I",     NULL },
+    { "SYS_getrandom",      (void *)wali_sys_getrandom_pt,     "(iii)I",       NULL },
+    { "SYS_statx",          (void *)wali_sys_statx_pt,         "(iiiii)I",     NULL },
+    { "SYS_tkill",          (void *)wali_sys_tkill_pt,         "(ii)I",        NULL },
+    { "SYS_mremap",         (void *)wali_sys_mremap_pt,        "(iiiii)I",     NULL },
+    { "SYS_fchdir",         (void *)wali_sys_fchdir_pt,        "(i)I",         NULL },
+    { "SYS_execve",         (void *)wali_sys_execve_pt,        "(iii)I",       NULL },
+    { "SYS_wait4",          (void *)wali_sys_wait4_pt,         "(iiii)I",      NULL },
+    { "SYS_ptrace",         (void *)wali_sys_ptrace_pt,        "(iiii)I",      NULL },
+    { "SYS_socket",         (void *)wali_sys_socket_pt,        "(iii)I",       NULL },
+    { "SYS_connect",        (void *)wali_sys_connect_pt,       "(iii)I",       NULL },
+    { "SYS_sendmsg",        (void *)wali_sys_sendmsg_pt,       "(iii)I",       NULL },
+    { "SYS_symlink",        (void *)wali_sys_symlink_pt,       "(ii)I",        NULL },
+    { "SYS_chown",          (void *)wali_sys_chown_pt,         "(iii)I",       NULL },
+    { "SYS_fchown",         (void *)wali_sys_fchown_pt,        "(iii)I",       NULL },
+    { "SYS_getrusage",      (void *)wali_sys_getrusage_pt,     "(ii)I",        NULL },
+    { "SYS_sysinfo",        (void *)wali_sys_sysinfo_pt,       "(i)I",         NULL },
+    { "SYS_sched_setscheduler",(void *)wali_sys_sched_setscheduler_pt,"(iii)I",NULL },
+    { "SYS_sched_getaffinity",(void *)wali_sys_sched_getaffinity_pt,"(iii)I",  NULL },
+    { "SYS_utimes",         (void *)wali_sys_utimes_pt,        "(ii)I",        NULL },
+    { "SYS_futimesat",      (void *)wali_sys_futimesat_pt,     "(iii)I",       NULL },
+    { "SYS_set_robust_list",(void *)wali_sys_set_robust_list_pt,"(ii)I",       NULL },
+    { "SYS_utimensat",      (void *)wali_sys_utimensat_pt,     "(iiii)I",      NULL },
 };
 
 void wasm_register_wali_natives(void)

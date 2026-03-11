@@ -624,6 +624,72 @@ static int32_t wasm_api_kill(wasm_exec_env_t exec_env, int32_t pid)
     return 0;
 }
 
+static int32_t wasm_api_ptrace(wasm_exec_env_t exec_env, int32_t request,
+                                int32_t pid, int32_t addr, int32_t data)
+{
+    (void)addr;
+
+    switch (request) {
+    case PTRACE_SYSCALL: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -1;
+        e->ptrace_syscall = true;
+        if (e->state == PROC_STOPPED) {
+            e->state = PROC_RUNNING;
+            waitqueue_wake_all(&e->exit_wq);
+        }
+        return 0;
+    }
+    case PTRACE_CONT: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -1;
+        e->ptrace_syscall = false;
+        if (e->state == PROC_STOPPED) {
+            e->state = PROC_RUNNING;
+            waitqueue_wake_all(&e->exit_wq);
+        }
+        return 0;
+    }
+    case PTRACE_GETREGS: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -1;
+        wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+        if (!wasm_runtime_validate_app_addr(inst, (uint64_t)data,
+                                             (uint64_t)sizeof(ptrace_info_t)))
+            return -1;
+        ptrace_info_t *info = wasm_runtime_addr_app_to_native(inst,
+                                                               (uint64_t)data);
+        *info = e->ptrace_info;
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+static int32_t wasm_api_wait4(wasm_exec_env_t exec_env, int32_t pid,
+                               int32_t *wstatus)
+{
+    (void)exec_env;
+    if (pid <= 0)
+        return -1;
+
+    proc_entry_t *e = proc_get(pid);
+    if (!e)
+        return -1;
+
+    while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
+        waitqueue_sleep(&e->ptrace_wq);
+
+    if (wstatus) {
+        if (e->state == PROC_STOPPED)
+            *wstatus = (5 << 8) | 0x7f;
+        else
+            *wstatus = (e->exit_code << 8);
+    }
+    return pid;
+}
+
 static int32_t wasm_api_getpid(wasm_exec_env_t exec_env)
 {
     wasm_process_t *proc = WAMR_PROC(exec_env);
@@ -871,6 +937,8 @@ static NativeSymbol env_symbols[] = {
     { "spawn",              (void *)wasm_api_spawn,             "(*~*~i)i",     NULL },
     { "waitpid",            (void *)wasm_api_waitpid,           "(i)i",         NULL },
     { "kill",               (void *)wasm_api_kill,              "(i)i",         NULL },
+    { "ptrace",             (void *)wasm_api_ptrace,            "(iiii)i",      NULL },
+    { "wait4",              (void *)wasm_api_wait4,             "(i*)i",        NULL },
     { "getpid",             (void *)wasm_api_getpid,            "()i",          NULL },
     { "dup2",               (void *)wasm_api_dup2,              "(ii)i",        NULL },
     { "pipe",               (void *)wasm_api_pipe,              "(*)i",         NULL },

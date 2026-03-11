@@ -1,6 +1,9 @@
 #include "platform_api_vmcore.h"
 #include "platform_api_extension.h"
 
+#include <pmm.h>
+#include <vmm.h>
+
 int
 os_thread_sys_init(void);
 
@@ -48,17 +51,19 @@ os_dumps_proc_mem_info(char *out, unsigned int size)
 void *
 os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 {
-    void *addr;
     (void)hint;
-    (void)prot;
     (void)flags;
     (void)file;
 
-    if (size >= UINT32_MAX)
+    size_t num_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    void *addr = find_free_virt_pages(num_pages);
+    if (!addr)
         return NULL;
 
-    if ((addr = BH_MALLOC((uint32)size)))
-        memset(addr, 0, (uint32)size);
+    if (prot & (MMAP_PROT_READ | MMAP_PROT_WRITE)) {
+        if (os_mprotect(addr, size, prot) != 0)
+            return NULL;
+    }
 
     return addr;
 }
@@ -72,16 +77,38 @@ os_mremap(void *old_addr, size_t old_size, size_t new_size)
 void
 os_munmap(void *addr, size_t size)
 {
-    (void)size;
-    BH_FREE(addr);
+    uintptr_t start = (uintptr_t)addr & ~(PAGE_SIZE - 1);
+    uintptr_t end = ((uintptr_t)addr + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+    for (uintptr_t va = start; va < end; va += PAGE_SIZE) {
+        void *phys = vmm_get_phys((void *)va);
+        if (phys) {
+            vmm_unmap_page((void *)va);
+            pmm_free_page(phys);
+        }
+    }
 }
 
 int
 os_mprotect(void *addr, size_t size, int prot)
 {
-    (void)addr;
-    (void)size;
-    (void)prot;
+    if (!(prot & (MMAP_PROT_READ | MMAP_PROT_WRITE)))
+        return 0;
+
+    uintptr_t start = (uintptr_t)addr & ~(PAGE_SIZE - 1);
+    uintptr_t end = ((uintptr_t)addr + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+    for (uintptr_t va = start; va < end; va += PAGE_SIZE) {
+        if (vmm_get_phys((void *)va) != NULL)
+            continue;
+        void *phys = pmm_alloc_page();
+        if (!phys)
+            return -1;
+        uint32_t flags = VMM_PRESENT | VMM_WRITE;
+        if (!mmap_physical((void *)va, phys, PAGE_SIZE, flags))
+            return -1;
+        memset((void *)va, 0, PAGE_SIZE);
+    }
     return 0;
 }
 

@@ -3,6 +3,7 @@
 
 #include <heap.h>
 #include <scheduler.h>
+#include <string.h>
 #include <waitqueue.h>
 
 static bool is_thread_sys_inited = false;
@@ -234,6 +235,31 @@ uint8 *
 os_thread_get_stack_boundary(void)
 {
     return NULL;
+}
+
+int
+os_thread_detach(korp_tid thread)
+{
+    (void)thread;
+    return BHT_OK;
+}
+
+void
+os_thread_exit(void *retval)
+{
+    (void)retval;
+    os_thread_data *td = thread_data_list_lookup(os_self_thread());
+    if (td) {
+        td->ret = retval;
+        td->done = true;
+        waitqueue_wake_all(&td->join_wq);
+        thread_data_list_remove(td);
+        free(td);
+    }
+    thread_cancel(scheduler_get_current_id());
+    scheduler_yield();
+    while (1)
+        __asm__ volatile("hlt");
 }
 
 void

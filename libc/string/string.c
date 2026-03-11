@@ -187,6 +187,18 @@ int strcasecmp(const char *s1, const char *s2)
            tolower(*(const unsigned char *)s2);
 }
 
+int strncasecmp(const char *s1, const char *s2, size_t n)
+{
+    if (!n)
+        return 0;
+    while (--n && *s1 && (tolower(*s1) == tolower(*s2))) {
+        s1++;
+        s2++;
+    }
+    return tolower(*(const unsigned char *)s1) -
+           tolower(*(const unsigned char *)s2);
+}
+
 int strcmp(const char *s1, const char *s2)
 {
     while (*s1 && (*s1 == *s2)) {

@@ -7,6 +7,7 @@
 #include <limine.h>
 #include <keyboard.h>
 #include <stdio.h>
+#include <serial.h>
 #include <tty.h>
 #include <waitqueue.h>
 
@@ -231,6 +232,8 @@ static void tty_handle_csi(tty_t *tty, char c)
 
 void tty_putchar(tty_t *tty, char c)
 {
+    write_serial(c);
+
     switch (tty->parse_state) {
     case TTY_STATE_NORMAL:
         if (c == '\x1b') {
