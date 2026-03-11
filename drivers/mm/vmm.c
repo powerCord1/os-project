@@ -178,9 +178,6 @@ void *mmap_physical(void *virt_addr, void *phys_addr, size_t size,
         virt_aligned = (uintptr_t)virt_addr & ~(PAGE_SIZE - 1);
     }
 
-    log_verbose("VMM: Mapping %d pages from phys 0x%x to virt 0x%x", num_pages,
-                phys_aligned, virt_aligned);
-
     for (size_t i = 0; i < num_pages; i++) {
         void *current_phys = (void *)(phys_aligned + i * PAGE_SIZE);
         void *current_virt = (void *)(virt_aligned + i * PAGE_SIZE);

@@ -82,7 +82,6 @@ int sata_read(hba_port_t *port, uint64_t start, uint32_t count, uint16_t *buf)
 {
     port->is = (uint32_t)-1; // Clear pending interrupt bits
     int slot = ahci_find_cmdslot(port);
-    log_verbose("sata_read: ahci_find_cmdslot(%p): %d", port, slot);
     if (slot == -1) {
         return 0;
     }
