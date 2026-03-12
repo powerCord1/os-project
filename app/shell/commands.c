@@ -14,6 +14,7 @@
 #include <power.h>
 #include <process.h>
 #include <scheduler.h>
+#include <serial.h>
 #include <shell.h>
 #include <sound.h>
 #include <stdio.h>
@@ -119,6 +120,8 @@ void cmd_sysinfo(int argc, char **argv)
     printf("APIC:   %s\n\n", is_apic_enabled() ? "enabled" : "disabled");
     print_build_info();
 
+    printf("\nSerial over LAN: %s\n", sol_enabled ? "enabled" : "disabled");
+
     printf("\nCPU model: %s\n", cpu_model_name);
     int battery_percentage = get_battery_percentage();
     if (battery_percentage == -1) {
@@ -127,6 +130,11 @@ void cmd_sysinfo(int argc, char **argv)
         printf("Battery percentage: %d%%\n", battery_percentage);
     }
     printf("CPU temperature: %.2f°C\n", acpi_get_cpu_temp(false));
+}
+
+void cmd_susinfo(int argc, char **argv)
+{
+    printf("sus");
 }
 
 void cmd_meminfo(int argc, char **argv)

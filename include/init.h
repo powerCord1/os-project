@@ -1,5 +1,7 @@
 #include <cmos.h>
 
+#define EARLY_SERIAL false
+
 static datetime_t boot_time;
 
 typedef struct {

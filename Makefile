@@ -43,7 +43,7 @@ endif
 # Base CFLAGS that work on all architectures
 CFLAGS = -std=gnu99 \
 		 -ffreestanding \
-		 -O0 \
+		 -O3 \
 		 -Wall \
 		 -Wextra \
 		 -DBUILD_VERSION="\"$(BUILD_VERSION)\"" \
