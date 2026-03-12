@@ -19,15 +19,9 @@ static uint8_t *procfs_generate_status(int32_t pid, uint32_t *out_size)
     int n = snprintf(buf, sizeof(buf),
         "Pid:\t%d\n"
         "PPid:\t%d\n"
-        "State:\t%c\n"
-        "LoadRead:\t%u\n"
-        "LoadTotal:\t%u\n"
-        "HeapUsed:\t%u\n"
-        "LoadDone:\t%d\n",
+        "State:\t%c\n",
         p->pid, p->parent_pid,
-        state_chars[p->state],
-        p->load_bytes_read, p->load_bytes_total,
-        p->load_heap_used, p->load_done);
+        state_chars[p->state]);
 
     *out_size = n;
     uint8_t *data = malloc(n + 1);

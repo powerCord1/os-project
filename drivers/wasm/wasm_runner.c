@@ -97,39 +97,13 @@ static void apply_fd_setup(wasm_process_t *proc, fd_setup_entry_t *setups, int c
     }
 }
 
-static volatile int32_t wasm_loading_pid = -1;
-
-static void *wasm_tracked_malloc(unsigned int size)
-{
-    void *p = malloc(size);
-    int32_t pid = wasm_loading_pid;
-    if (pid >= 0) {
-        proc_entry_t *e = proc_get(pid);
-        if (e)
-            e->load_heap_used = heap_get_used_memory();
-    }
-    return p;
-}
-
-static void *wasm_tracked_realloc(void *ptr, unsigned int size)
-{
-    void *p = realloc(ptr, size);
-    int32_t pid = wasm_loading_pid;
-    if (pid >= 0) {
-        proc_entry_t *e = proc_get(pid);
-        if (e)
-            e->load_heap_used = heap_get_used_memory();
-    }
-    return p;
-}
-
 void wasm_runtime_setup(void)
 {
     RuntimeInitArgs args;
     memset(&args, 0, sizeof(args));
     args.mem_alloc_type = Alloc_With_Allocator;
-    args.mem_alloc_option.allocator.malloc_func = (void *)wasm_tracked_malloc;
-    args.mem_alloc_option.allocator.realloc_func = (void *)wasm_tracked_realloc;
+    args.mem_alloc_option.allocator.malloc_func = (void *)malloc;
+    args.mem_alloc_option.allocator.realloc_func = (void *)realloc;
     args.mem_alloc_option.allocator.free_func = (void *)free;
 
     if (!wasm_runtime_full_init(&args)) {
@@ -139,15 +113,6 @@ void wasm_runtime_setup(void)
 
     wasm_register_env_natives();
     wasm_register_wali_natives();
-}
-
-static void wasm_load_progress(uint32_t bytes_read, uint32_t total, void *ctx)
-{
-    proc_entry_t *e = proc_get((int32_t)(intptr_t)ctx);
-    if (e) {
-        e->load_bytes_total = total;
-        e->load_bytes_read = bytes_read;
-    }
 }
 
 static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
@@ -171,20 +136,17 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
     proc_entry_t *entry = proc_get(pid);
 
     uint32_t size = 0;
-    uint8_t *wasm_bytes = vfs_read_file_ex(parent_cluster, filename, &size,
-                                           wasm_load_progress, (void *)(intptr_t)pid);
+    uint8_t *wasm_bytes = vfs_read_file(parent_cluster, filename, &size);
     free(filename);
     if (!wasm_bytes) {
         printf("Failed to read '%s'\n", path);
         return -1;
     }
-    wasm_loading_pid = pid;
 
     wasm_process_t *proc = wasm_process_create(argc, argv);
     if (!proc) {
         printf("Failed to allocate process\n");
         free(wasm_bytes);
-        wasm_loading_pid = -1;
         return -1;
     }
     proc->pid = pid;
@@ -198,7 +160,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         printf("Load error: %s\n", err);
         free(wasm_bytes);
         wasm_process_destroy(proc);
-        wasm_loading_pid = -1;
+
         return -1;
     }
 
@@ -208,7 +170,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         wasm_runtime_unload(module);
         free(wasm_bytes);
         wasm_process_destroy(proc);
-        wasm_loading_pid = -1;
+
         return -1;
     }
 
@@ -219,7 +181,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         wasm_runtime_unload(module);
         free(wasm_bytes);
         wasm_process_destroy(proc);
-        wasm_loading_pid = -1;
+
         return -1;
     }
 
@@ -239,7 +201,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         wasm_runtime_unload(module);
         free(wasm_bytes);
         wasm_process_destroy(proc);
-        wasm_loading_pid = -1;
+
         return -1;
     }
 
@@ -253,11 +215,6 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
             did_attach_kbd = true;
         }
     }
-
-    wasm_loading_pid = -1;
-
-    if (entry)
-        entry->load_done = true;
 
     bool ok = wasm_runtime_call_wasm(exec_env, func, 0, NULL);
 

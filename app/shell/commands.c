@@ -502,17 +502,6 @@ void cmd_rmdir(int argc, char **argv)
     free((void *)dirname_to_del);
 }
 
-#define PROGRESS_BAR_WIDTH 20
-
-static void print_progress_bar(uint32_t pct, uint32_t alloc_kb)
-{
-    int filled = (pct * PROGRESS_BAR_WIDTH) / 100;
-    printf("\r[");
-    for (int i = 0; i < PROGRESS_BAR_WIDTH; i++)
-        putchar(i < filled ? '#' : '-');
-    printf("] %u%% %u KB", pct, alloc_kb);
-}
-
 void cmd_wasm(int argc, char **argv)
 {
     if (argc < 2) {
@@ -520,7 +509,6 @@ void cmd_wasm(int argc, char **argv)
         return;
     }
 
-    uint32_t heap_before = heap_get_used_memory();
     int32_t pid = wasm_spawn(argv[1], argc - 1, argv + 1, 0);
     if (pid < 0) {
         printf("Failed to start '%s'\n", argv[1]);
@@ -528,31 +516,6 @@ void cmd_wasm(int argc, char **argv)
     }
 
     proc_entry_t *entry = proc_get(pid);
-    uint64_t last_tick = pit_ticks;
-    bool showed_progress = false;
-
-    while (entry && entry->state != PROC_EXITED) {
-        if (entry->load_done)
-            break;
-        uint64_t now = pit_ticks;
-        if (now - last_tick >= 100) {
-            uint32_t alloc_kb = 0;
-            if (entry->load_heap_used > heap_before)
-                alloc_kb = (entry->load_heap_used - heap_before) / 1024;
-
-            if (entry->load_bytes_total > 0) {
-                uint32_t pct = (entry->load_bytes_read * 100) / entry->load_bytes_total;
-                print_progress_bar(pct, alloc_kb);
-                showed_progress = true;
-            }
-            last_tick = now;
-        }
-        scheduler_yield();
-    }
-
-    if (showed_progress)
-        printf("\n");
-
     while (entry && entry->state != PROC_EXITED)
         scheduler_yield();
 
