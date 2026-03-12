@@ -48,6 +48,8 @@ static bool wamr_enlarge_memory(wasm_exec_env_t exec_env, uint32_t target_pages)
 wasm_process_t *wasm_process_create(int argc, char **argv)
 {
     wasm_process_t *proc = malloc(sizeof(wasm_process_t));
+    if (!proc)
+        return NULL;
     memset(proc, 0, sizeof(wasm_process_t));
 
     proc->argc = argc < WASM_MAX_ARGC ? argc : WASM_MAX_ARGC;

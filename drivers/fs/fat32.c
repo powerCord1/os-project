@@ -101,11 +101,29 @@ bool fat32_mount_internal(int disk_id, uint32_t lba_start, uint32_t num_sectors,
     fs->fat_start = fs->lba_start + fs->reserved_sector_count;
     fs->data_start = fs->fat_start + (fs->num_fats * fs->fat_size_32);
 
+    uint32_t fat_bytes = fs->fat_size_32 * fs->bytes_per_sector;
+    fs->fat_cache = (uint8_t *)malloc(fat_bytes);
+    fs->fat_cache_sectors = fs->fat_size_32;
+    if (!fs->fat_cache) {
+        log_err("Failed to allocate FAT cache (%u bytes)", fat_bytes);
+        free(vbr_data);
+        free(fs);
+        return false;
+    }
+
+    if (!disk_read(fs->disk_id, fs->fat_start, fs->fat_size_32, fs->fat_cache)) {
+        log_err("Failed to read FAT table");
+        free(fs->fat_cache);
+        free(vbr_data);
+        free(fs);
+        return false;
+    }
+
     mount->fs_data = fs;
     mount->root_cluster = fs->root_cluster;
 
-    log_info("FAT32: Mounted filesystem on disk %d, LBA start 0x%x",
-             fs->disk_id, fs->lba_start);
+    log_info("FAT32: Mounted on disk %d, FAT cached (%u KB)",
+             fs->disk_id, fat_bytes / 1024);
 
     free(vbr_data);
     return true;
@@ -114,7 +132,10 @@ bool fat32_mount_internal(int disk_id, uint32_t lba_start, uint32_t num_sectors,
 bool fat32_unmount_internal(vfs_mount_t *mount)
 {
     if (mount->fs_data) {
-        free(mount->fs_data);
+        fat32_fs_t *fs = (fat32_fs_t *)mount->fs_data;
+        if (fs->fat_cache)
+            free(fs->fat_cache);
+        free(fs);
         mount->fs_data = NULL;
         return true;
     }
@@ -128,82 +149,36 @@ static uint32_t fat32_get_cluster_lba(fat32_fs_t *fs, uint32_t cluster)
 
 static uint32_t fat32_get_next_cluster(fat32_fs_t *fs, uint32_t current_cluster)
 {
-    uint32_t fat_offset = current_cluster * 4;
-    uint32_t fat_sector = fs->fat_start + (fat_offset / fs->bytes_per_sector);
-    uint32_t entry_offset = fat_offset % fs->bytes_per_sector;
-
-    uint8_t *fat_sector_data = (uint8_t *)malloc(fs->bytes_per_sector);
-    if (!fat_sector_data) {
-        return 0;
-    }
-
-    if (!disk_read(fs->disk_id, fat_sector, 1, fat_sector_data)) {
-        free(fat_sector_data);
-        return 0;
-    }
-
-    uint32_t next_cluster =
-        *((uint32_t *)&fat_sector_data[entry_offset]) & 0x0FFFFFFF;
-    free(fat_sector_data);
-
-    return next_cluster;
+    uint32_t offset = current_cluster * 4;
+    return *(uint32_t *)(fs->fat_cache + offset) & 0x0FFFFFFF;
 }
 
 static void fat32_set_next_cluster(fat32_fs_t *fs, uint32_t current_cluster,
                                    uint32_t next_cluster)
 {
-    uint32_t fat_offset = current_cluster * 4;
-    uint32_t fat_sector = fs->fat_start + (fat_offset / fs->bytes_per_sector);
-    uint32_t entry_offset = fat_offset % fs->bytes_per_sector;
+    uint32_t offset = current_cluster * 4;
+    *(uint32_t *)(fs->fat_cache + offset) = next_cluster;
 
-    uint8_t *fat_sector_data = (uint8_t *)malloc(fs->bytes_per_sector);
-    if (!fat_sector_data) {
+    uint32_t fat_sector = fs->fat_start + (offset / fs->bytes_per_sector);
+
+    uint8_t *sector_buf = (uint8_t *)malloc(fs->bytes_per_sector);
+    if (!sector_buf)
         return;
-    }
 
-    if (!disk_read(fs->disk_id, fat_sector, 1, fat_sector_data)) {
-        free(fat_sector_data);
-        return;
-    }
-
-    *((uint32_t *)&fat_sector_data[entry_offset]) = next_cluster;
-
-    disk_write(fs->disk_id, fat_sector, 1, fat_sector_data);
-    free(fat_sector_data);
+    memcpy(sector_buf, fs->fat_cache + (fat_sector - fs->fat_start) * fs->bytes_per_sector,
+           fs->bytes_per_sector);
+    disk_write(fs->disk_id, fat_sector, 1, sector_buf);
+    free(sector_buf);
 }
 
 static uint32_t fat32_find_free_cluster(fat32_fs_t *fs)
 {
-    uint8_t *fat_sector_data = (uint8_t *)malloc(fs->bytes_per_sector);
-    if (!fat_sector_data) {
-        return 0;
+    uint32_t total_entries = (fs->fat_size_32 * fs->bytes_per_sector) / 4;
+    for (uint32_t i = 2; i < total_entries; i++) {
+        uint32_t entry = *(uint32_t *)(fs->fat_cache + i * 4) & 0x0FFFFFFF;
+        if (entry == 0)
+            return i;
     }
-
-    for (uint32_t fat_sector_idx = 0; fat_sector_idx < fs->fat_size_32;
-         fat_sector_idx++) {
-        uint32_t current_fat_lba = fs->fat_start + fat_sector_idx;
-
-        if (!disk_read(fs->disk_id, current_fat_lba, 1, fat_sector_data)) {
-            free(fat_sector_data);
-            return 0;
-        }
-
-        for (uint32_t i = 0; i < fs->bytes_per_sector / 4; i++) {
-            uint32_t cluster_entry =
-                *((uint32_t *)&fat_sector_data[i * 4]) & 0x0FFFFFFF;
-            if (cluster_entry == 0) {
-                uint32_t free_cluster =
-                    (fat_sector_idx * (fs->bytes_per_sector / 4)) + i;
-                if (free_cluster < 2) {
-                    continue;
-                }
-                free(fat_sector_data);
-                return free_cluster;
-            }
-        }
-    }
-
-    free(fat_sector_data);
     return 0;
 }
 
@@ -718,7 +693,11 @@ static uint8_t *fat32_read_file_common(vfs_mount_t *mount, uint32_t cluster,
     }
 
     *size = file_entry->file_size;
-    uint8_t *file_content = (uint8_t *)malloc(*size + 1);
+    uint32_t cluster_bytes = fs->bytes_per_sector * fs->sectors_per_cluster;
+    uint32_t alloc_size = ((*size + cluster_bytes - 1) / cluster_bytes) * cluster_bytes;
+    if (alloc_size == 0)
+        alloc_size = cluster_bytes;
+    uint8_t *file_content = (uint8_t *)malloc(alloc_size + 1);
     if (!file_content) {
         free(file_entry);
         return NULL;
@@ -727,23 +706,34 @@ static uint8_t *fat32_read_file_common(vfs_mount_t *mount, uint32_t cluster,
     uint32_t current_cluster = (file_entry->first_cluster_high << 16) |
                                file_entry->first_cluster_low;
     uint32_t bytes_read = 0;
-    uint8_t *buffer = (uint8_t *)malloc(fs->bytes_per_sector * fs->sectors_per_cluster);
 
     while (bytes_read < *size) {
-        uint32_t cluster_lba = fat32_get_cluster_lba(fs, current_cluster);
-        disk_read(fs->disk_id, cluster_lba, fs->sectors_per_cluster, buffer);
+        uint32_t run_start = current_cluster;
+        uint32_t run_len = 1;
 
-        uint32_t to_copy = fs->bytes_per_sector * fs->sectors_per_cluster;
-        if (bytes_read + to_copy > *size)
-            to_copy = *size - bytes_read;
-        memcpy(file_content + bytes_read, buffer, to_copy);
-        bytes_read += to_copy;
+        while (bytes_read + run_len * cluster_bytes < *size) {
+            uint32_t next = fat32_get_next_cluster(fs, run_start + run_len - 1);
+            if (next != run_start + run_len)
+                break;
+            run_len++;
+        }
+
+        uint32_t run_bytes = run_len * cluster_bytes;
+        uint32_t remaining = *size - bytes_read;
+        if (run_bytes > remaining)
+            run_bytes = remaining;
+
+        uint32_t cluster_lba = fat32_get_cluster_lba(fs, run_start);
+        disk_read(fs->disk_id, cluster_lba, run_len * fs->sectors_per_cluster,
+                  file_content + bytes_read);
+
+        bytes_read += run_bytes;
         if (progress)
             progress(bytes_read, *size, ctx);
-        current_cluster = fat32_get_next_cluster(fs, current_cluster);
+
+        current_cluster = fat32_get_next_cluster(fs, run_start + run_len - 1);
     }
     file_content[*size] = '\0';
-    free(buffer);
     free(file_entry);
     return file_content;
 }

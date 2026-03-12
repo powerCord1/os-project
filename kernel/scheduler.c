@@ -44,9 +44,15 @@ static void thread_wrapper(void (*entry)(void *), void *arg)
 thread_t *thread_create(void (*entry)(void *), void *arg)
 {
     thread_t *thread = malloc(sizeof(thread_t));
+    if (!thread)
+        return NULL;
     thread->id = next_thread_id++;
     thread->state = THREAD_STATE_READY;
     thread->stack_base = malloc(THREAD_STACK_SIZE);
+    if (!thread->stack_base) {
+        free(thread);
+        return NULL;
+    }
 
     // Set up the initial stack, aligned to 16 bytes
     uint64_t *stack = (uint64_t *)(((uintptr_t)thread->stack_base

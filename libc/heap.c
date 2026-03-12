@@ -52,18 +52,26 @@ void *malloc(size_t size)
 
 void free(void *ptr)
 {
-    if (!ptr) {
+    if (!ptr)
         return;
-    }
 
     block_t *block_to_free = (block_t *)((uint8_t *)ptr - sizeof(block_t));
-
     block_to_free->free = true;
 
     if (block_to_free->next && block_to_free->next->free) {
         block_to_free->size += sizeof(block_t) + block_to_free->next->size;
-
         block_to_free->next = block_to_free->next->next;
+    }
+
+    block_t *prev = NULL;
+    block_t *curr = heap_start;
+    while (curr && curr != block_to_free) {
+        prev = curr;
+        curr = curr->next;
+    }
+    if (prev && prev->free) {
+        prev->size += sizeof(block_t) + block_to_free->size;
+        prev->next = block_to_free->next;
     }
 }
 

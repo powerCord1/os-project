@@ -181,6 +181,12 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
     wasm_loading_pid = pid;
 
     wasm_process_t *proc = wasm_process_create(argc, argv);
+    if (!proc) {
+        printf("Failed to allocate process\n");
+        free(wasm_bytes);
+        wasm_loading_pid = -1;
+        return -1;
+    }
     proc->pid = pid;
 
     if (entry)
@@ -324,10 +330,17 @@ static int32_t spawn_common(const char *path, int argc, char **argv,
                             int setup_count, bool set_foreground)
 {
     int32_t pid = proc_alloc(parent_pid);
-    if (pid < 0)
+    if (pid < 0) {
+        printf("spawn: proc_alloc failed\n");
         return -1;
+    }
 
     spawn_args_t *args = malloc(sizeof(spawn_args_t));
+    if (!args) {
+        printf("spawn: malloc failed (%u bytes)\n", (unsigned)sizeof(spawn_args_t));
+        proc_free(pid);
+        return -1;
+    }
     strncpy(args->path, path, sizeof(args->path) - 1);
     args->path[sizeof(args->path) - 1] = '\0';
     args->argc = argc < WASM_MAX_ARGC ? argc : WASM_MAX_ARGC;
@@ -350,6 +363,12 @@ static int32_t spawn_common(const char *path, int argc, char **argv,
     }
 
     thread_t *t = thread_create(wasm_spawn_entry, args);
+    if (!t) {
+        printf("spawn: thread_create failed\n");
+        proc_free(pid);
+        free(args);
+        return -1;
+    }
     proc_entry_t *entry = proc_get(pid);
     if (entry)
         entry->thread_id = t->id;
