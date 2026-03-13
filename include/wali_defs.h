@@ -119,6 +119,14 @@
 #define SYS_TKILL           200
 #define SYS_PTRACE          101
 #define SYS_FACCESSAT2      439
+#define SYS_GETPEERNAME      52
+#define SYS_SETREUID        113
+#define SYS_SETREGID        114
+#define SYS_GETGROUPS       115
+#define SYS_SETRESUID       117
+#define SYS_SETRESGID       119
+#define SYS_SETRLIMIT       160
+#define SYS_PSELECT6        270
 
 /* Linux errno codes */
 #define L_EPERM          1
@@ -149,6 +157,7 @@
 #define L_ESPIPE        29
 #define L_EAFNOSUPPORT  97
 #define L_ENOTSUP       95
+#define L_ENOTSOCK      88
 
 /* Linux open flags */
 #define L_O_RDONLY     0x0000
@@ -185,6 +194,8 @@
 #define L_TCSETS     0x5402
 #define L_TCSETSW    0x5403
 #define L_TCSETSF    0x5404
+#define L_TIOCGPGRP  0x540F
+#define L_TIOCSPGRP  0x5410
 #define L_TIOCGWINSZ 0x5413
 #define L_FIONREAD   0x541B
 

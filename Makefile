@@ -134,6 +134,8 @@ WAMR_CFLAGS = -I$(WAMR_CORE)/iwasm/include \
               -DBH_MALLOC=wasm_runtime_malloc \
               -DBH_FREE=wasm_runtime_free \
               -DWASM_ENABLE_BULK_MEMORY_OPT=1 \
+              -DWASM_ENABLE_DUMP_CALL_STACK=1 \
+              -DWASM_ENABLE_CUSTOM_NAME_SECTION=1 \
               -I$(WAMR_CORE)/iwasm/libraries/thread-mgr
 
 WAMR_C_SOURCES = \

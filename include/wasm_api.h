@@ -8,6 +8,7 @@
 #define WASM_MAX_FDS 64
 #define WASM_MAX_ARGC 16
 #define WASM_MAX_ARG_LEN 256
+#define WASM_MAX_JMPBUFS 16
 
 #define WASM_O_RDONLY 0x0001
 #define WASM_O_WRONLY 0x0002
@@ -44,6 +45,14 @@ typedef struct {
     };
 } wasm_fd_t;
 
+typedef struct {
+    int32_t wasm_buf_addr;      /* WASM-side jmp_buf address (key) */
+    void *saved_frame;          /* WASM frame of setjmp's caller (prev_frame) */
+    void *saved_stack_top;      /* wasm_stack.top to restore (= native frame start) */
+    void *saved_sp;             /* caller frame's sp at setjmp time */
+    bool active;
+} wali_jmpbuf_entry_t;
+
 typedef struct wasm_process {
     int argc;
     char argv[WASM_MAX_ARGC][WASM_MAX_ARG_LEN];
@@ -68,6 +77,8 @@ typedef struct wasm_process {
     int64_t itimer_interval_us;
     int64_t itimer_value_us;
     uint64_t itimer_next_tick;
+
+    wali_jmpbuf_entry_t jmpbufs[WASM_MAX_JMPBUFS];
 } wasm_process_t;
 
 wasm_process_t *wasm_process_create(int argc, char **argv);

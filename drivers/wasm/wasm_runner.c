@@ -164,7 +164,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         return -1;
     }
 
-    wasm_module_inst_t inst = wasm_runtime_instantiate(module, 32768, 65536, err, sizeof(err));
+    wasm_module_inst_t inst = wasm_runtime_instantiate(module, 131072, 65536, err, sizeof(err));
     if (!inst) {
         printf("Instantiate error: %s\n", err);
         wasm_runtime_unload(module);
@@ -174,7 +174,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         return -1;
     }
 
-    wasm_exec_env_t exec_env = wasm_runtime_create_exec_env(inst, 32768);
+    wasm_exec_env_t exec_env = wasm_runtime_create_exec_env(inst, 131072);
     if (!exec_env) {
         printf("Failed to create exec env\n");
         wasm_runtime_deinstantiate(inst);
@@ -229,6 +229,7 @@ static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
         if (exc && strstr(exc, "wali exit")) {
             ret = proc->exit_code;
         } else {
+            wasm_runtime_dump_call_stack(exec_env);
             printf("Trap: %s\n", exc ? exc : "unknown");
             ret = -1;
         }

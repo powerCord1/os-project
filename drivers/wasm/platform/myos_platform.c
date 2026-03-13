@@ -134,3 +134,13 @@ wasm_trap_delete(void *trap)
 {
     (void)trap;
 }
+
+/* Stub for WASM_ENABLE_DUMP_CALL_STACK — the real implementation lives in
+   wasm_c_api.c which we don't compile.  Only called from thread_manager
+   when propagating exceptions across threads; harmless as a no-op here. */
+void
+wasm_frame_vec_clone_internal(void *src, void *out)
+{
+    (void)src;
+    (void)out;
+}

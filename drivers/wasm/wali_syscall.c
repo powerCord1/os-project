@@ -13,8 +13,8 @@
 #include <procfs.h>
 #include <wasm_api.h>
 #include <wali_defs.h>
-
 #include "wasm_runtime.h"
+#include "wasm_interp.h"
 
 #define WALI_PROC(exec_env) ((wasm_process_t *)wasm_runtime_get_user_data(exec_env))
 
@@ -192,23 +192,67 @@ static int32_t wali_get_init_envfile(wasm_exec_env_t exec_env, int32_t buf_off, 
     return 0;
 }
 
-static int32_t wali_sigsetjmp(wasm_exec_env_t exec_env, int32_t buf, int32_t savesigs)
+static wali_jmpbuf_entry_t *jmpbuf_find_or_alloc(wasm_process_t *proc, int32_t buf_addr)
 {
-    (void)exec_env; (void)buf; (void)savesigs;
-    return 0;
+    for (int i = 0; i < WASM_MAX_JMPBUFS; i++)
+        if (proc->jmpbufs[i].active && proc->jmpbufs[i].wasm_buf_addr == buf_addr)
+            return &proc->jmpbufs[i];
+    for (int i = 0; i < WASM_MAX_JMPBUFS; i++)
+        if (!proc->jmpbufs[i].active) {
+            proc->jmpbufs[i].wasm_buf_addr = buf_addr;
+            proc->jmpbufs[i].active = true;
+            return &proc->jmpbufs[i];
+        }
+    return NULL;
 }
 
 static int32_t wali_setjmp(wasm_exec_env_t exec_env, int32_t buf)
 {
-    (void)exec_env; (void)buf;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    wali_jmpbuf_entry_t *entry = jmpbuf_find_or_alloc(proc, buf);
+    if (!entry) return 0;
+
+    /* exec_env->cur_frame = native frame for this setjmp call.
+       Its prev_frame = the WASM caller's frame, whose ip/sp/csp
+       were saved by SYNC_ALL_TO_FRAME before the native call. */
+    WASMInterpFrame *native_frame = wasm_exec_env_get_cur_frame(exec_env);
+    entry->saved_frame = native_frame->prev_frame;
+    entry->saved_stack_top = (void *)native_frame;
+    entry->saved_sp = native_frame->prev_frame->sp;
     return 0;
+}
+
+static int32_t wali_sigsetjmp(wasm_exec_env_t exec_env, int32_t buf, int32_t savesigs)
+{
+    (void)savesigs;
+    return wali_setjmp(exec_env, buf);
 }
 
 static void wali_longjmp(wasm_exec_env_t exec_env, int32_t buf, int32_t val)
 {
-    (void)buf; (void)val;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    for (int i = 0; i < WASM_MAX_JMPBUFS; i++) {
+        if (proc->jmpbufs[i].active && proc->jmpbufs[i].wasm_buf_addr == buf) {
+            wali_jmpbuf_entry_t *entry = &proc->jmpbufs[i];
+            WASMInterpFrame *target = (WASMInterpFrame *)entry->saved_frame;
+
+            /* Restore WASM execution state */
+            wasm_exec_env_set_cur_frame(exec_env, target);
+            wasm_exec_env_free_wasm_frame(exec_env, entry->saved_stack_top);
+
+            /* Push return value onto caller's operand stack */
+            target->sp = entry->saved_sp;
+            target->sp[0] = val ? val : 1;
+            target->sp++;
+
+            /* Signal interpreter to resume from restored frame */
+            wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+            wasm_runtime_set_exception(inst, "wali longjmp");
+            return;
+        }
+    }
     wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
-    wasm_runtime_set_exception(inst, "longjmp not supported");
+    wasm_runtime_set_exception(inst, "longjmp: invalid jmp_buf");
 }
 
 static int32_t wali_thread_spawn(wasm_exec_env_t exec_env, uint32_t fn, int32_t args)
@@ -1535,6 +1579,15 @@ static int64_t wali_sys_ioctl(wasm_exec_env_t exec_env, int32_t fd,
         ws->ws_ypixel = 0;
         return 0;
     }
+    case L_TIOCGPGRP: {
+        int32_t *pgrp = wali_get_mem(exec_env, argp_off, 4);
+        if (!pgrp) return -L_EFAULT;
+        *pgrp = proc->pid;
+        return 0;
+    }
+    case L_TIOCSPGRP: {
+        return 0;
+    }
     case L_FIONREAD: {
         int32_t *np = wali_get_mem(exec_env, argp_off, 4);
         if (!np) return -L_EFAULT;
@@ -1544,7 +1597,7 @@ static int64_t wali_sys_ioctl(wasm_exec_env_t exec_env, int32_t fd,
         return 0;
     }
     default:
-        return -L_ENOTTY;
+        return -L_EINVAL;
     }
 }
 
@@ -1946,6 +1999,152 @@ static int64_t wali_sys_setuid(wasm_exec_env_t exec_env, int32_t uid)
 static int64_t wali_sys_setgid(wasm_exec_env_t exec_env, int32_t gid)
 {
     (void)exec_env; (void)gid;
+    return 0;
+}
+
+static int64_t wali_sys_setrlimit(wasm_exec_env_t exec_env, int32_t resource,
+                                   int32_t rlim_off)
+{
+    (void)exec_env; (void)resource; (void)rlim_off;
+    return 0;
+}
+
+static int64_t wali_sys_getpeername(wasm_exec_env_t exec_env, int32_t fd,
+                                     int32_t addr_off, int32_t addrlen_off)
+{
+    (void)exec_env; (void)fd; (void)addr_off; (void)addrlen_off;
+    return -L_ENOTSOCK;
+}
+
+static int64_t wali_sys_pselect6(wasm_exec_env_t exec_env, int32_t nfds,
+                                  int32_t readfds_off, int32_t writefds_off,
+                                  int32_t exceptfds_off, int32_t timeout_off,
+                                  int32_t sigmask_off)
+{
+    (void)sigmask_off;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    if (nfds < 0 || nfds > WASM_MAX_FDS)
+        nfds = WASM_MAX_FDS;
+
+    uint64_t rfds = 0, wfds = 0, efds = 0;
+    if (readfds_off) {
+        uint8_t *p = wali_get_mem(exec_env, readfds_off, 128);
+        if (!p) return -L_EFAULT;
+        memcpy(&rfds, p, 8);
+    }
+    if (writefds_off) {
+        uint8_t *p = wali_get_mem(exec_env, writefds_off, 128);
+        if (!p) return -L_EFAULT;
+        memcpy(&wfds, p, 8);
+    }
+    if (exceptfds_off) {
+        uint8_t *p = wali_get_mem(exec_env, exceptfds_off, 128);
+        if (!p) return -L_EFAULT;
+        memcpy(&efds, p, 8);
+    }
+
+    int32_t timeout_ms = -1;
+    if (timeout_off) {
+        linux_timespec_t *ts = wali_get_mem(exec_env, timeout_off, sizeof(linux_timespec_t));
+        if (!ts) return -L_EFAULT;
+        timeout_ms = (int32_t)(ts->tv_sec * 1000 + ts->tv_nsec / 1000000);
+    }
+
+    uint64_t deadline = 0;
+    if (timeout_ms > 0)
+        deadline = pit_ticks + (uint64_t)timeout_ms;
+
+    int ready;
+    do {
+        ready = 0;
+        uint64_t r_out = 0, w_out = 0;
+
+        for (int fd = 0; fd < nfds; fd++) {
+            uint64_t bit = 1ULL << fd;
+            if (fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
+                continue;
+            if ((rfds & bit) && fd_check_readable(proc, fd)) {
+                r_out |= bit;
+                ready++;
+            }
+            if ((wfds & bit) && fd_check_writable(proc, fd)) {
+                w_out |= bit;
+                ready++;
+            }
+        }
+
+        if (ready > 0 || timeout_ms == 0) {
+            if (readfds_off) {
+                uint8_t *p = wali_get_mem(exec_env, readfds_off, 128);
+                memset(p, 0, 128);
+                memcpy(p, &r_out, 8);
+            }
+            if (writefds_off) {
+                uint8_t *p = wali_get_mem(exec_env, writefds_off, 128);
+                memset(p, 0, 128);
+                memcpy(p, &w_out, 8);
+            }
+            if (exceptfds_off) {
+                uint8_t *p = wali_get_mem(exec_env, exceptfds_off, 128);
+                memset(p, 0, 128);
+            }
+            break;
+        }
+
+        proc_entry_t *e = proc_get(proc->pid);
+        if (e) {
+            if (e->killed)
+                return -L_EINTR;
+            uint64_t deliverable = e->sig_pending & ~proc->sig_mask;
+            if (deliverable) {
+                proc->sig_pending |= e->sig_pending;
+                e->sig_pending = 0;
+                return -L_EINTR;
+            }
+        }
+
+        if (timeout_ms < 0) {
+            tty_t *tty = tty_get(proc->tty_id);
+            waitqueue_sleep(&tty->input_wq);
+        } else {
+            if (pit_ticks >= deadline)
+                break;
+            scheduler_yield();
+        }
+    } while (1);
+
+    return (int64_t)ready;
+}
+
+static int64_t wali_sys_setregid(wasm_exec_env_t exec_env, int32_t rgid, int32_t egid)
+{
+    (void)exec_env; (void)rgid; (void)egid;
+    return 0;
+}
+
+static int64_t wali_sys_setreuid(wasm_exec_env_t exec_env, int32_t ruid, int32_t euid)
+{
+    (void)exec_env; (void)ruid; (void)euid;
+    return 0;
+}
+
+static int64_t wali_sys_getgroups(wasm_exec_env_t exec_env, int32_t size, int32_t list_off)
+{
+    (void)exec_env; (void)size; (void)list_off;
+    return 0;
+}
+
+static int64_t wali_sys_setresuid(wasm_exec_env_t exec_env, int32_t ruid,
+                                   int32_t euid, int32_t suid)
+{
+    (void)exec_env; (void)ruid; (void)euid; (void)suid;
+    return 0;
+}
+
+static int64_t wali_sys_setresgid(wasm_exec_env_t exec_env, int32_t rgid,
+                                   int32_t egid, int32_t sgid)
+{
+    (void)exec_env; (void)rgid; (void)egid; (void)sgid;
     return 0;
 }
 
@@ -2638,6 +2837,14 @@ DEF_TRACED_0(wali_sys_getgid, SYS_GETGID)
 DEF_TRACED_1(wali_sys_setuid, SYS_SETUID)
 DEF_TRACED_1(wali_sys_setgid, SYS_SETGID)
 DEF_TRACED_0(wali_sys_geteuid, SYS_GETEUID)
+DEF_TRACED_2(wali_sys_setrlimit, SYS_SETRLIMIT)
+DEF_TRACED_3(wali_sys_getpeername, SYS_GETPEERNAME)
+DEF_TRACED_6(wali_sys_pselect6, SYS_PSELECT6)
+DEF_TRACED_2(wali_sys_setregid, SYS_SETREGID)
+DEF_TRACED_2(wali_sys_setreuid, SYS_SETREUID)
+DEF_TRACED_2(wali_sys_getgroups, SYS_GETGROUPS)
+DEF_TRACED_3(wali_sys_setresuid, SYS_SETRESUID)
+DEF_TRACED_3(wali_sys_setresgid, SYS_SETRESGID)
 DEF_TRACED_0(wali_sys_getegid, SYS_GETEGID)
 DEF_TRACED_2(wali_sys_setpgid, SYS_SETPGID)
 DEF_TRACED_0(wali_sys_getppid, SYS_GETPPID)
@@ -2713,6 +2920,7 @@ static NativeSymbol wali_symbols[] = {
     { "sigsetjmp",          (void *)wali_sigsetjmp,         "(ii)i",        NULL },
     { "setjmp",             (void *)wali_setjmp,            "(i)i",         NULL },
     { "longjmp",            (void *)wali_longjmp,           "(ii)",         NULL },
+    { "siglongjmp",         (void *)wali_longjmp,           "(ii)",         NULL },
     { "__wasm_thread_spawn",(void *)wali_thread_spawn,      "(ii)i",        NULL },
 
     /* Syscalls (traced via ptrace wrappers) */
@@ -2832,6 +3040,14 @@ static NativeSymbol wali_symbols[] = {
     { "SYS_setxattr",       (void *)wali_sys_setxattr_pt,      "(iiiii)I",     NULL },
     { "SYS_getxattr",       (void *)wali_sys_getxattr_pt,      "(iiii)I",      NULL },
     { "SYS_listxattr",      (void *)wali_sys_listxattr_pt,     "(iii)I",       NULL },
+    { "SYS_setrlimit",      (void *)wali_sys_setrlimit_pt,     "(ii)I",        NULL },
+    { "SYS_getpeername",    (void *)wali_sys_getpeername_pt,   "(iii)I",       NULL },
+    { "SYS_pselect6",       (void *)wali_sys_pselect6_pt,     "(iiiiii)I",    NULL },
+    { "SYS_setregid",       (void *)wali_sys_setregid_pt,     "(ii)I",        NULL },
+    { "SYS_setreuid",       (void *)wali_sys_setreuid_pt,     "(ii)I",        NULL },
+    { "SYS_getgroups",      (void *)wali_sys_getgroups_pt,    "(ii)I",        NULL },
+    { "SYS_setresuid",      (void *)wali_sys_setresuid_pt,    "(iii)I",       NULL },
+    { "SYS_setresgid",      (void *)wali_sys_setresgid_pt,    "(iii)I",       NULL },
 };
 
 void wasm_register_wali_natives(void)
