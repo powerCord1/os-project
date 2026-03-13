@@ -192,7 +192,12 @@ $(BUILDDIR)/wasm/%.wm: $(WASM_SRCDIR)/%.c $(WASM_SRCDIR)/api.h
 	$(WASM_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -Wl,--export=_start -o $@ $<
 
 disk: wasm
-	@echo "Creating disk image..."
+	@echo "Creating ext2 disk image..."
+	@./buildscripts/mkdisk_ext2.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
+	@echo "Disk image created: $(DISK_IMG)"
+
+disk_fat32: wasm
+	@echo "Creating FAT32 disk image..."
 	@./buildscripts/mkdisk.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
 	@echo "Disk image created: $(DISK_IMG)"
 
@@ -266,4 +271,4 @@ format:
 
 rebuild: clean all
 
-.PHONY: all _build clean clean_disk rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands wasm disk
+.PHONY: all _build clean clean_disk rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands wasm disk disk_fat32

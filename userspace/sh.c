@@ -9,22 +9,15 @@ static int strcmp(const char *a, const char *b)
     return *(unsigned char *)a - *(unsigned char *)b;
 }
 
-static char to_upper(char c)
-{
-    if (c >= 'a' && c <= 'z')
-        return c - ('a' - 'A');
-    return c;
-}
-
 static void build_path(const char *cmd, char *path)
 {
     path[0] = '/';
     int pi = 1;
     for (int i = 0; cmd[i] && pi < 60; i++)
-        path[pi++] = to_upper(cmd[i]);
+        path[pi++] = cmd[i];
     path[pi++] = '.';
-    path[pi++] = 'W';
-    path[pi++] = 'M';
+    path[pi++] = 'w';
+    path[pi++] = 'm';
     path[pi] = '\0';
 }
 

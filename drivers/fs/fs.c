@@ -1,5 +1,6 @@
 #include <debug.h>
 #include <disk.h>
+#include <ext2.h>
 #include <fat32.h>
 #include <fs.h>
 #include <heap.h>
@@ -69,7 +70,7 @@ bool vfs_unmount()
 void fs_init()
 {
     disk_init();
-    fat32_init();
+    ext2_init();
 }
 
 char **vfs_list_directory(uint32_t cluster, int *count)
