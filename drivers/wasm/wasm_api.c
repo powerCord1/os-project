@@ -83,6 +83,57 @@ wasm_process_t *wasm_process_create(int argc, char **argv)
     return proc;
 }
 
+wasm_process_t *wasm_process_deep_copy(wasm_process_t *src)
+{
+    wasm_process_t *dst = malloc(sizeof(wasm_process_t));
+    if (!dst)
+        return NULL;
+    memcpy(dst, src, sizeof(wasm_process_t));
+
+    /* Clone file data buffers and ref-count pipes */
+    for (int i = 0; i < WASM_MAX_FDS; i++) {
+        wasm_fd_t *f = &dst->fds[i];
+        switch (f->type) {
+        case FD_FILE:
+            if (f->file.data && f->file.size > 0) {
+                uint8_t *copy = malloc(f->file.size);
+                if (copy) {
+                    memcpy(copy, f->file.data, f->file.size);
+                    f->file.data = copy;
+                } else {
+                    f->file.data = NULL;
+                    f->file.size = 0;
+                }
+            }
+            break;
+        case FD_PIPE_READ:
+            pipe_ref_read(f->pipe.pipe_id);
+            break;
+        case FD_PIPE_WRITE:
+            pipe_ref_write(f->pipe.pipe_id);
+            break;
+        default:
+            break;
+        }
+    }
+
+    /* Clear per-execution state that shouldn't be inherited */
+    for (int i = 0; i < WASM_MAX_JMPBUFS; i++)
+        dst->jmpbufs[i].active = false;
+    dst->sig_pending = 0;
+    dst->itimer_interval_us = 0;
+    dst->itimer_value_us = 0;
+    dst->itimer_next_tick = 0;
+
+    /* Runtime pointers will be set by fork child entry */
+    dst->wasm_module = NULL;
+    dst->wasm_inst = NULL;
+    dst->wasm_exec_env = NULL;
+    dst->wasm_bytes = NULL;
+
+    return dst;
+}
+
 void wasm_process_destroy(wasm_process_t *proc)
 {
     for (int i = 0; i < WASM_MAX_FDS; i++) {

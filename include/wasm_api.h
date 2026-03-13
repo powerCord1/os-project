@@ -79,9 +79,23 @@ typedef struct wasm_process {
     uint64_t itimer_next_tick;
 
     wali_jmpbuf_entry_t jmpbufs[WASM_MAX_JMPBUFS];
+
+    /* Runtime pointers for fork access (set by wasm_run_module) */
+    void *wasm_module;      /* wasm_module_t — shared, refcounted */
+    void *wasm_inst;        /* wasm_module_inst_t — parent's instance */
+    void *wasm_exec_env;    /* wasm_exec_env_t — parent's exec env */
+    uint8_t *wasm_bytes;    /* original module bytecode */
+    bool is_fork_child;     /* true if this proc was created by fork */
+
+    /* Execve state: set by wali_sys_execve, consumed by runner */
+    uint8_t *execve_wasm_bytes;   /* new module bytecode (malloc'd) */
+    uint32_t execve_wasm_size;    /* size of new module bytecode */
+    bool execve_pending;          /* true when execve is requested */
 } wasm_process_t;
 
 wasm_process_t *wasm_process_create(int argc, char **argv);
+wasm_process_t *wasm_process_deep_copy(wasm_process_t *src);
 void wasm_process_destroy(wasm_process_t *proc);
 void wasm_register_env_natives(void);
 void wasm_register_wali_natives(void);
+void wasm_fork_child_entry(void *arg);

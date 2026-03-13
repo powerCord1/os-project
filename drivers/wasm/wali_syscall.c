@@ -12,6 +12,7 @@
 #include <waitqueue.h>
 #include <procfs.h>
 #include <wasm_api.h>
+#include <wasm_runner.h>
 #include <wali_defs.h>
 #include "wasm_runtime.h"
 #include "wasm_interp.h"
@@ -61,6 +62,7 @@ static void ptrace_notify_exit(wasm_exec_env_t exec_env, int64_t ret)
 
 #define PTRACE_ENTER(env, nr, ...) ptrace_notify_entry(env, nr, __VA_ARGS__)
 #define PTRACE_EXIT(env, ret)      ptrace_notify_exit(env, ret)
+
 #define PTRACE_RETURN(env, val) do { \
     int64_t _r = (val); \
     ptrace_notify_exit(env, _r); \
@@ -2196,28 +2198,119 @@ static int64_t wali_sys_fchdir(wasm_exec_env_t exec_env, int32_t fd)
     return -L_ENOSYS;
 }
 
-static int64_t wali_sys_execve(wasm_exec_env_t exec_env, int32_t pathname,
-                                int32_t argv, int32_t envp)
+static int64_t wali_sys_execve(wasm_exec_env_t exec_env, int32_t pathname_off,
+                                int32_t argv_off, int32_t envp)
 {
-    (void)exec_env; (void)pathname; (void)argv; (void)envp;
-    wali_stub_log(SYS_EXECVE);
-    return -L_ENOSYS;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    (void)envp;  /* environment not supported yet */
+
+    /* 1. Read pathname from WASM memory */
+    const char *path = wali_get_string(exec_env, pathname_off);
+    if (!path) return -L_EFAULT;
+
+    /* Strip leading ./ */
+    while (path[0] == '.' && path[1] == '/')
+        path += 2;
+
+    /* 2. Build absolute path using cwd */
+    char pathbuf[256];
+    if (path[0] != '/') {
+        const char *cwd = proc->cwd;
+        if (cwd[0] == '/' && cwd[1] == '\0')
+            snprintf(pathbuf, sizeof(pathbuf), "/%s", path);
+        else
+            snprintf(pathbuf, sizeof(pathbuf), "%s/%s", cwd, path);
+    } else {
+        strncpy(pathbuf, path, sizeof(pathbuf) - 1);
+        pathbuf[sizeof(pathbuf) - 1] = '\0';
+    }
+
+    /* 3. Read the WASM binary from filesystem */
+    uint32_t parent_cluster;
+    char *filename = NULL;
+    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
+        if (filename) free(filename);
+        return -L_ENOENT;
+    }
+    uint32_t size = 0;
+    uint8_t *wasm_bytes = vfs_read_file(parent_cluster, filename, &size);
+    free(filename);
+    if (!wasm_bytes) return -L_ENOENT;
+
+    /* 4. Parse argv from WASM memory (before we trash the instance) */
+    proc->argc = 0;
+    if (argv_off) {
+        for (int i = 0; i < WASM_MAX_ARGC; i++) {
+            int32_t *slot = wali_get_mem(exec_env, argv_off + i * 4, 4);
+            if (!slot || *slot == 0) break;
+            const char *arg = wali_get_string(exec_env, *slot);
+            if (!arg) break;
+            strncpy(proc->argv[i], arg, WASM_MAX_ARG_LEN - 1);
+            proc->argv[i][WASM_MAX_ARG_LEN - 1] = '\0';
+            proc->argc++;
+        }
+    }
+
+    /* 5. Store execve state and trigger exception to unwind */
+    proc->execve_wasm_bytes = wasm_bytes;
+    proc->execve_wasm_size = size;
+    proc->execve_pending = true;
+
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    wasm_runtime_set_exception(inst, "wali execve");
+    return 0;  /* never actually returned — exception unwinds */
 }
 
 static int64_t wali_sys_wait4(wasm_exec_env_t exec_env, int32_t pid,
                                int32_t wstatus_off, int32_t options, int32_t rusage)
 {
-    (void)options; (void)rusage;
-    if (pid <= 0)
+    (void)rusage;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+    int32_t my_pid = proc->pid;
+
+    #define W_NOHANG    1
+    #define W_UNTRACED  2
+
+    proc_entry_t *e = NULL;
+
+    if (pid > 0) {
+        /* Wait for a specific child */
+        e = proc_get(pid);
+        if (!e || e->parent_pid != my_pid)
+            return -L_ECHILD;
+    } else if (pid == -1 || pid == 0) {
+        /* Wait for any child process */
+        while (1) {
+            bool has_children = false;
+            for (int i = 1; i < PROC_MAX; i++) {
+                proc_entry_t *c = proc_get(i);
+                if (!c || c->parent_pid != my_pid) continue;
+                has_children = true;
+                if (c->state == PROC_EXITED || c->state == PROC_STOPPED) {
+                    e = c;
+                    break;
+                }
+            }
+            if (e) break;
+            if (!has_children) return -L_ECHILD;
+            if (options & W_NOHANG) return 0;
+            scheduler_yield();
+        }
+        goto fill_status;
+    } else {
         return -L_EINVAL;
+    }
 
-    proc_entry_t *e = proc_get(pid);
-    if (!e)
-        return -L_ESRCH;
+    /* Specific pid path */
+    if (options & W_NOHANG) {
+        if (e->state != PROC_STOPPED && e->state != PROC_EXITED)
+            return 0;
+    } else {
+        while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
+            waitqueue_sleep(&e->exit_wq);
+    }
 
-    while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
-        waitqueue_sleep(&e->ptrace_wq);
-
+fill_status:
     if (wstatus_off) {
         int32_t *ws = wali_get_mem(exec_env, wstatus_off, 4);
         if (ws) {
@@ -2227,7 +2320,10 @@ static int64_t wali_sys_wait4(wasm_exec_env_t exec_env, int32_t pid,
                 *ws = (e->exit_code << 8);
         }
     }
-    return (int64_t)pid;
+    return (int64_t)e->pid;
+
+    #undef W_NOHANG
+    #undef W_UNTRACED
 }
 
 static int64_t wali_sys_ptrace(wasm_exec_env_t exec_env, int32_t request,
@@ -2469,8 +2565,113 @@ static int64_t wali_sys_rt_sigpending(wasm_exec_env_t exec_env, int32_t set_off,
 
 static int64_t wali_sys_fork(wasm_exec_env_t exec_env)
 {
-    (void)exec_env;
-    return -L_ENOSYS;
+    wasm_process_t *proc = WALI_PROC(exec_env);
+
+    /* 1. Allocate child PID */
+    int32_t child_pid = proc_alloc(proc->pid);
+    if (child_pid < 0)
+        return -L_EAGAIN;
+
+    /* 2. Deep copy process state */
+    wasm_process_t *child_proc = wasm_process_deep_copy(proc);
+    if (!child_proc) {
+        proc_free(child_pid);
+        return -L_ENOMEM;
+    }
+    child_proc->pid = child_pid;
+    child_proc->tty_id = proc->tty_id;
+
+    /* 3. Snapshot parent's wasm_stack
+     *    cur_frame = native frame for this fork call
+     *    caller = native_frame->prev_frame (the WASM function that called SYS_fork)
+     */
+    WASMExecEnv *ee = (WASMExecEnv *)proc->wasm_exec_env;
+    WASMInterpFrame *native_frame = wasm_exec_env_get_cur_frame(ee);
+    WASMInterpFrame *caller = native_frame->prev_frame;
+
+    uint8_t *stack_bottom = ee->wasm_stack.bottom;
+    /* Snapshot up to the native frame (don't include it — child resumes from caller) */
+    uint8_t *stack_top = (uint8_t *)native_frame;
+    uint32_t stack_used = (uint32_t)(stack_top - stack_bottom);
+
+    fork_args_t *fargs = malloc(sizeof(fork_args_t));
+    if (!fargs) {
+        wasm_process_destroy(child_proc);
+        proc_free(child_pid);
+        return -L_ENOMEM;
+    }
+    fargs->child_pid = child_pid;
+    fargs->child_proc = child_proc;
+    fargs->parent_module = proc->wasm_module;
+    fargs->parent_inst = proc->wasm_inst;
+    fargs->parent_stack_snapshot = malloc(stack_used);
+    if (!fargs->parent_stack_snapshot) {
+        free(fargs);
+        wasm_process_destroy(child_proc);
+        proc_free(child_pid);
+        return -L_ENOMEM;
+    }
+    memcpy(fargs->parent_stack_snapshot, stack_bottom, stack_used);
+    fargs->parent_stack_used = stack_used;
+    fargs->parent_stack_size = (uint32_t)(ee->wasm_stack.top_boundary - stack_bottom);
+    fargs->parent_stack_bottom = stack_bottom;
+    fargs->parent_frame_offset = (int64_t)((uint8_t *)caller - stack_bottom);
+
+    /* Snapshot parent's linear memory and globals */
+    WASMModuleInstance *mi = (WASMModuleInstance *)proc->wasm_inst;
+    fargs->parent_mem_size = 0;
+    fargs->parent_mem_snapshot = NULL;
+    fargs->parent_global_size = 0;
+    fargs->parent_global_snapshot = NULL;
+
+    if (mi->memory_count > 0) {
+        uint32_t mem_size = (uint32_t)mi->memories[0]->memory_data_size;
+        fargs->parent_mem_size = mem_size;
+        fargs->parent_mem_snapshot = malloc(mem_size);
+        if (!fargs->parent_mem_snapshot) {
+            free(fargs->parent_stack_snapshot);
+            free(fargs);
+            wasm_process_destroy(child_proc);
+            proc_free(child_pid);
+            return -L_ENOMEM;
+        }
+        memcpy(fargs->parent_mem_snapshot, mi->memories[0]->memory_data, mem_size);
+    }
+
+    if (mi->global_data_size > 0) {
+        fargs->parent_global_size = mi->global_data_size;
+        fargs->parent_global_snapshot = malloc(mi->global_data_size);
+        if (!fargs->parent_global_snapshot) {
+            free(fargs->parent_mem_snapshot);
+            free(fargs->parent_stack_snapshot);
+            free(fargs);
+            wasm_process_destroy(child_proc);
+            proc_free(child_pid);
+            return -L_ENOMEM;
+        }
+        memcpy(fargs->parent_global_snapshot, mi->global_data, mi->global_data_size);
+    }
+
+    /* 4. Create child thread */
+    proc_entry_t *entry = proc_get(child_pid);
+    if (entry)
+        entry->wasm_proc = child_proc;
+
+    thread_t *t = thread_create(wasm_fork_child_entry, fargs);
+    if (!t) {
+        free(fargs->parent_global_snapshot);
+        free(fargs->parent_mem_snapshot);
+        free(fargs->parent_stack_snapshot);
+        free(fargs);
+        wasm_process_destroy(child_proc);
+        proc_free(child_pid);
+        return -L_EAGAIN;
+    }
+    if (entry)
+        entry->thread_id = t->id;
+
+    /* 5. Return child PID to parent */
+    return (int64_t)child_pid;
 }
 
 static int64_t wali_sys_setxattr(wasm_exec_env_t exec_env, int32_t path,

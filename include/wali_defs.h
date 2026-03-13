@@ -135,7 +135,10 @@
 #define L_EINTR          4
 #define L_EIO            5
 #define L_ENXIO          6
+#define L_E2BIG          7
+#define L_ENOEXEC        8
 #define L_EBADF          9
+#define L_ECHILD        10
 #define L_EAGAIN        11
 #define L_ENOMEM        12
 #define L_EACCES        13
