@@ -23,6 +23,7 @@
 #include <tty.h>
 #include <verinfo.h>
 #include <vmm.h>
+#include <wasm_runner.h>
 
 bool is_system_initialised = false;
 
@@ -59,6 +60,7 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init TTY", .func = tty_init},
     {.msg = "Init scheduler", .func = scheduler_init},
     {.msg = "Init process table", .func = proc_table_init},
+    {.msg = "Init WASM runtime", .func = wasm_runtime_setup},
 };
 
 boot_task_t late_boot_tasks[] = {

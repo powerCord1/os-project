@@ -26,3 +26,5 @@ void thread_cancel(uint64_t id);
 uint64_t scheduler_get_current_id(void);
 void scheduler_block_current(void);
 void scheduler_unblock(uint64_t id);
+void wait_for_thread(uint64_t id);
+void wait_for_all_threads();

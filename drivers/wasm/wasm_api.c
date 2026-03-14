@@ -10,19 +10,46 @@
 #include <framebuffer.h>
 #include <limine_defs.h>
 #include <pipe.h>
+#include <procfs.h>
 #include <tty.h>
 #include <waitqueue.h>
 #include <wasm_api.h>
 #include <wasm_runner.h>
 
-#include "wasm3.h"
-#include "m3_env.h"
+#include "wasm_runtime.h"
 
-#define WASM_PROC(ctx) ((wasm_process_t *)((ctx)->userdata))
+#define WAMR_PROC(exec_env) ((wasm_process_t *)wasm_runtime_get_user_data(exec_env))
+
+static uint32_t wamr_memory_size(wasm_exec_env_t exec_env)
+{
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    WASMModuleInstance *mi = (WASMModuleInstance *)inst;
+    if (mi->memory_count == 0)
+        return 0;
+    return mi->memories[0]->cur_page_count * 65536;
+}
+
+static uint8_t *wamr_memory_data(wasm_exec_env_t exec_env)
+{
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    return (uint8_t *)wasm_runtime_addr_app_to_native(inst, 0);
+}
+
+static bool wamr_enlarge_memory(wasm_exec_env_t exec_env, uint32_t target_pages)
+{
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    WASMModuleInstance *mi = (WASMModuleInstance *)inst;
+    uint32_t cur = mi->memories[0]->cur_page_count;
+    if (target_pages <= cur)
+        return true;
+    return wasm_runtime_enlarge_memory(inst, target_pages - cur);
+}
 
 wasm_process_t *wasm_process_create(int argc, char **argv)
 {
     wasm_process_t *proc = malloc(sizeof(wasm_process_t));
+    if (!proc)
+        return NULL;
     memset(proc, 0, sizeof(wasm_process_t));
 
     proc->argc = argc < WASM_MAX_ARGC ? argc : WASM_MAX_ARGC;
@@ -35,7 +62,76 @@ wasm_process_t *wasm_process_create(int argc, char **argv)
     proc->fds[1].type = FD_CONSOLE;
     proc->fds[2].type = FD_CONSOLE;
 
+    proc->brk_addr = 0;
+    proc->mmap_top = 0;
+    strncpy(proc->cwd, "/", sizeof(proc->cwd));
+
+    proc->c_iflag = 0x0500;
+    proc->c_oflag = 0x0005;
+    proc->c_cflag = 0x00BF;
+    proc->c_lflag = 0x8A3B;
+    memset(proc->c_cc, 0, sizeof(proc->c_cc));
+    proc->c_cc[0] = 0x03;
+    proc->c_cc[1] = 0x1C;
+    proc->c_cc[2] = 0x7F;
+    proc->c_cc[3] = 0x15;
+    proc->c_cc[4] = 0x04;
+    proc->c_cc[5] = 0x00;
+    proc->c_cc[6] = 0x01;
+    proc->umask = 0022;
+
     return proc;
+}
+
+wasm_process_t *wasm_process_deep_copy(wasm_process_t *src)
+{
+    wasm_process_t *dst = malloc(sizeof(wasm_process_t));
+    if (!dst)
+        return NULL;
+    memcpy(dst, src, sizeof(wasm_process_t));
+
+    /* Clone file data buffers and ref-count pipes */
+    for (int i = 0; i < WASM_MAX_FDS; i++) {
+        wasm_fd_t *f = &dst->fds[i];
+        switch (f->type) {
+        case FD_FILE:
+            if (f->file.data && f->file.size > 0) {
+                uint8_t *copy = malloc(f->file.size);
+                if (copy) {
+                    memcpy(copy, f->file.data, f->file.size);
+                    f->file.data = copy;
+                } else {
+                    f->file.data = NULL;
+                    f->file.size = 0;
+                }
+            }
+            break;
+        case FD_PIPE_READ:
+            pipe_ref_read(f->pipe.pipe_id);
+            break;
+        case FD_PIPE_WRITE:
+            pipe_ref_write(f->pipe.pipe_id);
+            break;
+        default:
+            break;
+        }
+    }
+
+    /* Clear per-execution state that shouldn't be inherited */
+    for (int i = 0; i < WASM_MAX_JMPBUFS; i++)
+        dst->jmpbufs[i].active = false;
+    dst->sig_pending = 0;
+    dst->itimer_interval_us = 0;
+    dst->itimer_value_us = 0;
+    dst->itimer_next_tick = 0;
+
+    /* Runtime pointers will be set by fork child entry */
+    dst->wasm_module = NULL;
+    dst->wasm_inst = NULL;
+    dst->wasm_exec_env = NULL;
+    dst->wasm_bytes = NULL;
+
+    return dst;
 }
 
 void wasm_process_destroy(wasm_process_t *proc)
@@ -72,8 +168,6 @@ static int wasm_fd_alloc(wasm_process_t *proc)
     return -1;
 }
 
-/* --- IO APIs --- */
-
 static void wasm_fd_putchar(wasm_process_t *proc, char c)
 {
     wasm_fd_t *f = &proc->fds[1];
@@ -89,94 +183,82 @@ static void wasm_fd_putchar(wasm_process_t *proc, char c)
     }
 }
 
-m3ApiRawFunction(wasm_api_print)
+static void wasm_api_print(wasm_exec_env_t exec_env, const char *ptr, uint32_t len)
 {
-    m3ApiGetArgMem(const char *, ptr)
-    m3ApiGetArg(uint32_t, len)
-    m3ApiCheckMem(ptr, len);
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     for (uint32_t i = 0; i < len; i++)
         wasm_fd_putchar(proc, ptr[i]);
-    m3ApiSuccess();
 }
 
-m3ApiRawFunction(wasm_api_putchar)
+static void wasm_api_putchar(wasm_exec_env_t exec_env, int32_t c)
 {
-    m3ApiGetArg(int32_t, c)
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     wasm_fd_putchar(proc, c);
-    m3ApiSuccess();
 }
 
-m3ApiRawFunction(wasm_api_get_ticks)
+static int64_t wasm_api_get_ticks(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(uint64_t)
-    m3ApiReturn(pit_ticks);
+    (void)exec_env;
+    return (int64_t)pit_ticks;
 }
 
-m3ApiRawFunction(wasm_api_exit)
+static void wasm_api_exit(wasm_exec_env_t exec_env, int32_t code)
 {
-    m3ApiGetArg(int32_t, code)
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     proc->exit_code = code;
-    m3ApiTrap(m3Err_trapExit);
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+    wasm_runtime_set_exception(inst, "wali exit");
 }
 
-m3ApiRawFunction(wasm_api_get_argc)
+static int32_t wasm_api_get_argc(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int32_t)
-    wasm_process_t *proc = WASM_PROC(_ctx);
-    m3ApiReturn(proc->argc);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
+    return proc->argc;
 }
 
-m3ApiRawFunction(wasm_api_get_argv)
+static int32_t wasm_api_get_argv(wasm_exec_env_t exec_env, int32_t index,
+                                  char *buf, int32_t buf_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, index)
-    m3ApiGetArgMem(char *, buf)
-    m3ApiGetArg(int32_t, buf_len)
-    m3ApiCheckMem(buf, buf_len);
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     if (index < 0 || index >= proc->argc)
-        m3ApiReturn(-1);
+        return -1;
     int len = strlen(proc->argv[index]);
     if (len >= buf_len)
         len = buf_len - 1;
     memcpy(buf, proc->argv[index], len);
     buf[len] = '\0';
-    m3ApiReturn(len);
+    return len;
 }
 
-m3ApiRawFunction(wasm_api_getchar)
+static int32_t wasm_api_getchar(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int32_t)
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     tty_t *tty = tty_get(proc->tty_id);
     char c;
     while (!tty_input_pop(tty, &c)) {
         proc_entry_t *e = proc_get(proc->pid);
         if (e && e->killed) {
             proc->exit_code = 137;
-            m3ApiTrap(m3Err_trapExit);
+            wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+            wasm_runtime_set_exception(inst, "wali exit");
+            return -1;
         }
         waitqueue_sleep(&tty->input_wq);
     }
     if (c == '\x03') {
         proc->exit_code = 130;
-        m3ApiTrap(m3Err_trapExit);
+        wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+        wasm_runtime_set_exception(inst, "wali exit");
+        return -1;
     }
     if (c == '\x04')
-        m3ApiReturn(-1);
-    m3ApiReturn((int32_t)c);
+        return -1;
+    return (int32_t)c;
 }
 
-m3ApiRawFunction(wasm_api_read_line)
+static int32_t wasm_api_read_line(wasm_exec_env_t exec_env, char *buf, int32_t max_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(char *, buf)
-    m3ApiGetArg(int32_t, max_len)
-    m3ApiCheckMem(buf, max_len);
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     tty_t *tty = tty_get(proc->tty_id);
     int32_t i = 0;
     while (i < max_len - 1) {
@@ -185,51 +267,53 @@ m3ApiRawFunction(wasm_api_read_line)
             proc_entry_t *e = proc_get(proc->pid);
             if (e && e->killed) {
                 proc->exit_code = 137;
-                m3ApiTrap(m3Err_trapExit);
+                wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+                wasm_runtime_set_exception(inst, "wali exit");
+                return -1;
             }
             waitqueue_sleep(&tty->input_wq);
         }
         if (c == '\x03') {
             proc->exit_code = 130;
-            m3ApiTrap(m3Err_trapExit);
+            wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+            wasm_runtime_set_exception(inst, "wali exit");
+            return -1;
         }
         if (c == '\x04') {
             if (i > 0)
                 break;
-            m3ApiReturn(-1);
+            return -1;
         }
         if (c == '\n')
             break;
         buf[i++] = c;
     }
     buf[i] = '\0';
-    m3ApiReturn(i);
+    return i;
 }
 
-/* --- Filesystem APIs --- */
-
-m3ApiRawFunction(wasm_api_open)
+static int32_t wasm_api_open(wasm_exec_env_t exec_env, const char *path,
+                              int32_t path_len, int32_t flags)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiGetArg(int32_t, flags)
-    m3ApiCheckMem(path, path_len);
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
-    int fd = wasm_fd_alloc(proc);
-    if (fd < 0)
-        m3ApiReturn(-1);
+    (void)path_len;
+    wasm_process_t *proc = WAMR_PROC(exec_env);
 
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
+    if (strncmp(pathbuf, "/proc/", 6) == 0)
+        return procfs_open(proc, pathbuf);
+
+    int fd = wasm_fd_alloc(proc);
+    if (fd < 0)
+        return -1;
+
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename))
-        m3ApiReturn(-1);
+        return -1;
 
     wasm_fd_t *f = &proc->fds[fd];
     uint32_t size = 0;
@@ -240,7 +324,7 @@ m3ApiRawFunction(wasm_api_open)
         size = 0;
     } else if (!data) {
         free(filename);
-        m3ApiReturn(-1);
+        return -1;
     }
 
     f->type = FD_FILE;
@@ -261,17 +345,14 @@ m3ApiRawFunction(wasm_api_open)
         f->file.dirty = true;
     }
 
-    m3ApiReturn(fd);
+    return fd;
 }
 
-m3ApiRawFunction(wasm_api_close)
+static int32_t wasm_api_close(wasm_exec_env_t exec_env, int32_t fd)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, fd)
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type == FD_NONE)
-        m3ApiReturn(-1);
+        return -1;
 
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
@@ -294,20 +375,15 @@ m3ApiRawFunction(wasm_api_close)
         break;
     }
     memset(f, 0, sizeof(wasm_fd_t));
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wasm_api_read)
+static int32_t wasm_api_read(wasm_exec_env_t exec_env, int32_t fd,
+                              uint8_t *buf, int32_t count)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArgMem(uint8_t *, buf)
-    m3ApiGetArg(int32_t, count)
-    m3ApiCheckMem(buf, count);
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
-        m3ApiReturn(-1);
+        return -1;
 
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
@@ -320,68 +396,65 @@ m3ApiRawFunction(wasm_api_read)
                 proc_entry_t *e = proc_get(proc->pid);
                 if (e && e->killed) {
                     proc->exit_code = 137;
-                    m3ApiTrap(m3Err_trapExit);
+                    wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+                    wasm_runtime_set_exception(inst, "wali exit");
+                    return -1;
                 }
                 waitqueue_sleep(&tty->input_wq);
             }
             if (c == '\x03') {
                 proc->exit_code = 130;
-                m3ApiTrap(m3Err_trapExit);
+                wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+                wasm_runtime_set_exception(inst, "wali exit");
+                return -1;
             }
             if (c == '\x04')
-                m3ApiReturn(i);
+                return i;
             buf[i++] = (uint8_t)c;
             if (c == '\n')
                 break;
         }
-        m3ApiReturn(i);
+        return i;
     }
     case FD_FILE: {
         int32_t avail = f->file.size - f->file.pos;
         if (avail <= 0)
-            m3ApiReturn(0);
+            return 0;
         if (count > avail)
             count = avail;
         memcpy(buf, f->file.data + f->file.pos, count);
         f->file.pos += count;
-        m3ApiReturn(count);
+        return count;
     }
-    case FD_PIPE_READ: {
-        int32_t n = pipe_read(f->pipe.pipe_id, buf, count);
-        m3ApiReturn(n);
-    }
+    case FD_PIPE_READ:
+        return pipe_read(f->pipe.pipe_id, buf, count);
     default:
-        m3ApiReturn(-1);
+        return -1;
     }
 }
 
-m3ApiRawFunction(wasm_api_write)
+static int32_t wasm_api_write(wasm_exec_env_t exec_env, int32_t fd,
+                               const uint8_t *buf, int32_t count)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArgMem(const uint8_t *, buf)
-    m3ApiGetArg(int32_t, count)
-    m3ApiCheckMem(buf, count);
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
-        m3ApiReturn(-1);
+        return -1;
 
     wasm_fd_t *f = &proc->fds[fd];
     switch (f->type) {
     case FD_CONSOLE: {
         tty_t *tty = tty_get(proc->tty_id);
         tty_write(tty, (const char *)buf, count);
-        m3ApiReturn(count);
+        return count;
     }
     case FD_FILE: {
         if (!f->file.writable)
-            m3ApiReturn(-1);
+            return -1;
         uint32_t end = f->file.pos + count;
         if (end > f->file.size) {
             uint8_t *new_data = realloc(f->file.data, end);
             if (!new_data)
-                m3ApiReturn(-1);
+                return -1;
             memset(new_data + f->file.size, 0, end - f->file.size);
             f->file.data = new_data;
             f->file.size = end;
@@ -389,58 +462,40 @@ m3ApiRawFunction(wasm_api_write)
         memcpy(f->file.data + f->file.pos, buf, count);
         f->file.pos += count;
         f->file.dirty = true;
-        m3ApiReturn(count);
+        return count;
     }
-    case FD_PIPE_WRITE: {
-        int32_t n = pipe_write(f->pipe.pipe_id, buf, count);
-        m3ApiReturn(n);
-    }
+    case FD_PIPE_WRITE:
+        return pipe_write(f->pipe.pipe_id, buf, count);
     default:
-        m3ApiReturn(-1);
+        return -1;
     }
 }
 
-m3ApiRawFunction(wasm_api_seek)
+static int32_t wasm_api_seek(wasm_exec_env_t exec_env, int32_t fd,
+                              int32_t offset, int32_t whence)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, fd)
-    m3ApiGetArg(int32_t, offset)
-    m3ApiGetArg(int32_t, whence)
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS || proc->fds[fd].type != FD_FILE)
-        m3ApiReturn(-1);
+        return -1;
 
     wasm_fd_t *f = &proc->fds[fd];
     int32_t new_pos;
     switch (whence) {
-    case WASM_SEEK_SET:
-        new_pos = offset;
-        break;
-    case WASM_SEEK_CUR:
-        new_pos = (int32_t)f->file.pos + offset;
-        break;
-    case WASM_SEEK_END:
-        new_pos = (int32_t)f->file.size + offset;
-        break;
-    default:
-        m3ApiReturn(-1);
+    case WASM_SEEK_SET: new_pos = offset; break;
+    case WASM_SEEK_CUR: new_pos = (int32_t)f->file.pos + offset; break;
+    case WASM_SEEK_END: new_pos = (int32_t)f->file.size + offset; break;
+    default: return -1;
     }
     if (new_pos < 0)
         new_pos = 0;
     f->file.pos = (uint32_t)new_pos;
-    m3ApiReturn(new_pos);
+    return new_pos;
 }
 
-m3ApiRawFunction(wasm_api_stat)
+static int32_t wasm_api_stat(wasm_exec_env_t exec_env, const char *path,
+                              int32_t path_len, uint32_t *stat_buf)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiGetArgMem(uint32_t *, stat_buf)
-    m3ApiCheckMem(path, path_len);
-    m3ApiCheckMem(stat_buf, 8);
-
+    (void)exec_env;
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -449,7 +504,7 @@ m3ApiRawFunction(wasm_api_stat)
     uint32_t parent_cluster;
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename))
-        m3ApiReturn(-1);
+        return -1;
 
     int count = 0;
     char **entries = vfs_list_directory(parent_cluster, &count);
@@ -460,31 +515,25 @@ m3ApiRawFunction(wasm_api_stat)
         stat_buf[0] = 0;
         stat_buf[1] = VFS_DIRECTORY;
         free(filename);
-        m3ApiReturn(0);
+        return 0;
     }
 
     uint32_t size = 0;
     uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
     free(filename);
     if (!data)
-        m3ApiReturn(-1);
+        return -1;
     free(data);
 
     stat_buf[0] = size;
     stat_buf[1] = VFS_FILE;
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wasm_api_readdir)
+static int32_t wasm_api_readdir(wasm_exec_env_t exec_env, const char *path,
+                                 int32_t path_len, char *buf, int32_t buf_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiGetArgMem(char *, buf)
-    m3ApiGetArg(int32_t, buf_len)
-    m3ApiCheckMem(path, path_len);
-    m3ApiCheckMem(buf, buf_len);
-
+    (void)exec_env;
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -492,7 +541,7 @@ m3ApiRawFunction(wasm_api_readdir)
 
     vfs_mount_t *mount = vfs_get_mounted_fs();
     if (!mount)
-        m3ApiReturn(-1);
+        return -1;
 
     uint32_t cluster = mount->root_cluster;
     if (strcmp(pathbuf, "/") != 0) {
@@ -500,7 +549,7 @@ m3ApiRawFunction(wasm_api_readdir)
         char *filename = NULL;
         if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
             if (filename) free(filename);
-            m3ApiReturn(-1);
+            return -1;
         }
         if (filename) free(filename);
     }
@@ -508,7 +557,7 @@ m3ApiRawFunction(wasm_api_readdir)
     int count = 0;
     char **entries = vfs_list_directory(cluster, &count);
     if (!entries)
-        m3ApiReturn(-1);
+        return -1;
 
     int pos = 0;
     int written = 0;
@@ -523,16 +572,12 @@ m3ApiRawFunction(wasm_api_readdir)
         free(entries[i]);
     }
     free(entries);
-    m3ApiReturn(written);
+    return written;
 }
 
-m3ApiRawFunction(wasm_api_mkdir)
+static int32_t wasm_api_mkdir(wasm_exec_env_t exec_env, const char *path, int32_t path_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiCheckMem(path, path_len);
-
+    (void)exec_env;
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -542,21 +587,17 @@ m3ApiRawFunction(wasm_api_mkdir)
     char *dirname = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
         if (dirname) free(dirname);
-        m3ApiReturn(-1);
+        return -1;
     }
 
     int32_t result = vfs_create_directory(parent_cluster, dirname) ? 0 : -1;
     free(dirname);
-    m3ApiReturn(result);
+    return result;
 }
 
-m3ApiRawFunction(wasm_api_unlink)
+static int32_t wasm_api_unlink(wasm_exec_env_t exec_env, const char *path, int32_t path_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiCheckMem(path, path_len);
-
+    (void)exec_env;
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -566,21 +607,17 @@ m3ApiRawFunction(wasm_api_unlink)
     char *filename = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
         if (filename) free(filename);
-        m3ApiReturn(-1);
+        return -1;
     }
 
     int32_t result = vfs_delete_file(parent_cluster, filename) ? 0 : -1;
     free(filename);
-    m3ApiReturn(result);
+    return result;
 }
 
-m3ApiRawFunction(wasm_api_rmdir)
+static int32_t wasm_api_rmdir(wasm_exec_env_t exec_env, const char *path, int32_t path_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiCheckMem(path, path_len);
-
+    (void)exec_env;
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -590,28 +627,18 @@ m3ApiRawFunction(wasm_api_rmdir)
     char *dirname = NULL;
     if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
         if (dirname) free(dirname);
-        m3ApiReturn(-1);
+        return -1;
     }
 
     int32_t result = vfs_delete_directory(parent_cluster, dirname) ? 0 : -1;
     free(dirname);
-    m3ApiReturn(result);
+    return result;
 }
 
-/* --- Process APIs --- */
-
-m3ApiRawFunction(wasm_api_spawn)
+static int32_t wasm_api_spawn(wasm_exec_env_t exec_env, const char *path,
+                               int32_t path_len, const char *args_buf,
+                               int32_t args_len, int32_t argc)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiGetArgMem(const char *, args_buf)
-    m3ApiGetArg(int32_t, args_len)
-    m3ApiGetArg(int32_t, argc)
-    m3ApiCheckMem(path, path_len);
-    if (args_len > 0)
-        m3ApiCheckMem(args_buf, args_len);
-
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -628,58 +655,112 @@ m3ApiRawFunction(wasm_api_spawn)
         p++;
     }
 
-    wasm_process_t *proc = WASM_PROC(_ctx);
-    int32_t pid = wasm_spawn(pathbuf, actual_argc, argv, proc->pid);
-    m3ApiReturn(pid);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
+    return wasm_spawn(pathbuf, actual_argc, argv, proc->pid);
 }
 
-m3ApiRawFunction(wasm_api_waitpid)
+static int32_t wasm_api_waitpid(wasm_exec_env_t exec_env, int32_t pid)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, pid)
-
+    (void)exec_env;
     proc_entry_t *e = proc_get(pid);
     if (!e)
-        m3ApiReturn(-1);
+        return -1;
     while (e->state != PROC_EXITED)
         waitqueue_sleep(&e->exit_wq);
     int32_t code = e->exit_code;
     proc_free(pid);
-    m3ApiReturn(code);
+    return code;
 }
 
-m3ApiRawFunction(wasm_api_kill)
+static int32_t wasm_api_kill(wasm_exec_env_t exec_env, int32_t pid)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, pid)
+    (void)exec_env;
+    proc_entry_t *e = proc_get(pid);
+    if (!e)
+        return -1;
+    e->killed = true;
+    return 0;
+}
+
+static int32_t wasm_api_ptrace(wasm_exec_env_t exec_env, int32_t request,
+                                int32_t pid, int32_t addr, int32_t data)
+{
+    (void)addr;
+
+    switch (request) {
+    case PTRACE_SYSCALL: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -1;
+        e->ptrace_syscall = true;
+        if (e->state == PROC_STOPPED) {
+            e->state = PROC_RUNNING;
+            waitqueue_wake_all(&e->exit_wq);
+        }
+        return 0;
+    }
+    case PTRACE_CONT: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -1;
+        e->ptrace_syscall = false;
+        if (e->state == PROC_STOPPED) {
+            e->state = PROC_RUNNING;
+            waitqueue_wake_all(&e->exit_wq);
+        }
+        return 0;
+    }
+    case PTRACE_GETREGS: {
+        proc_entry_t *e = proc_get(pid);
+        if (!e) return -1;
+        wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+        if (!wasm_runtime_validate_app_addr(inst, (uint64_t)data,
+                                             (uint64_t)sizeof(ptrace_info_t)))
+            return -1;
+        ptrace_info_t *info = wasm_runtime_addr_app_to_native(inst,
+                                                               (uint64_t)data);
+        *info = e->ptrace_info;
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+static int32_t wasm_api_wait4(wasm_exec_env_t exec_env, int32_t pid,
+                               int32_t *wstatus)
+{
+    (void)exec_env;
+    if (pid <= 0)
+        return -1;
 
     proc_entry_t *e = proc_get(pid);
     if (!e)
-        m3ApiReturn(-1);
-    e->killed = true;
-    m3ApiReturn(0);
+        return -1;
+
+    while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
+        waitqueue_sleep(&e->ptrace_wq);
+
+    if (wstatus) {
+        if (e->state == PROC_STOPPED)
+            *wstatus = (5 << 8) | 0x7f;
+        else
+            *wstatus = (e->exit_code << 8);
+    }
+    return pid;
 }
 
-m3ApiRawFunction(wasm_api_getpid)
+static int32_t wasm_api_getpid(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int32_t)
-    wasm_process_t *proc = WASM_PROC(_ctx);
-    m3ApiReturn(proc->pid);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
+    return proc->pid;
 }
 
-/* --- Pipe & Redirection APIs --- */
-
-m3ApiRawFunction(wasm_api_dup2)
+static int32_t wasm_api_dup2(wasm_exec_env_t exec_env, int32_t oldfd, int32_t newfd)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, oldfd)
-    m3ApiGetArg(int32_t, newfd)
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     if (oldfd < 0 || oldfd >= WASM_MAX_FDS || newfd < 0 || newfd >= WASM_MAX_FDS)
-        m3ApiReturn(-1);
+        return -1;
     if (proc->fds[oldfd].type == FD_NONE)
-        m3ApiReturn(-1);
+        return -1;
 
     if (proc->fds[newfd].type != FD_NONE) {
         wasm_fd_t *f = &proc->fds[newfd];
@@ -708,19 +789,15 @@ m3ApiRawFunction(wasm_api_dup2)
     else if (proc->fds[newfd].type == FD_PIPE_WRITE)
         pipe_ref_write(proc->fds[newfd].pipe.pipe_id);
 
-    m3ApiReturn(newfd);
+    return newfd;
 }
 
-m3ApiRawFunction(wasm_api_pipe)
+static int32_t wasm_api_pipe(wasm_exec_env_t exec_env, int32_t *fds_ptr)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(int32_t *, fds_ptr)
-    m3ApiCheckMem(fds_ptr, 8);
-
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     int pipe_id = pipe_alloc();
     if (pipe_id < 0)
-        m3ApiReturn(-1);
+        return -1;
 
     int rfd = -1, wfd = -1;
     for (int i = 3; i < WASM_MAX_FDS && (rfd < 0 || wfd < 0); i++) {
@@ -734,7 +811,7 @@ m3ApiRawFunction(wasm_api_pipe)
     if (rfd < 0 || wfd < 0) {
         pipe_unref_read(pipe_id);
         pipe_unref_write(pipe_id);
-        m3ApiReturn(-1);
+        return -1;
     }
 
     proc->fds[rfd].type = FD_PIPE_READ;
@@ -744,48 +821,35 @@ m3ApiRawFunction(wasm_api_pipe)
 
     fds_ptr[0] = rfd;
     fds_ptr[1] = wfd;
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wasm_api_pipe_create)
+static int32_t wasm_api_pipe_create(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int32_t)
-    int pipe_id = pipe_alloc();
-    m3ApiReturn(pipe_id);
+    (void)exec_env;
+    return pipe_alloc();
 }
 
-m3ApiRawFunction(wasm_api_pipe_close_read)
+static int32_t wasm_api_pipe_close_read(wasm_exec_env_t exec_env, int32_t pipe_id)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, pipe_id)
+    (void)exec_env;
     pipe_unref_read(pipe_id);
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wasm_api_pipe_close_write)
+static int32_t wasm_api_pipe_close_write(wasm_exec_env_t exec_env, int32_t pipe_id)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, pipe_id)
+    (void)exec_env;
     pipe_unref_write(pipe_id);
-    m3ApiReturn(0);
+    return 0;
 }
 
-m3ApiRawFunction(wasm_api_spawn_redirected)
+static int32_t wasm_api_spawn_redirected(wasm_exec_env_t exec_env,
+                                          const char *path, int32_t path_len,
+                                          const char *args_buf, int32_t args_len,
+                                          int32_t argc,
+                                          const uint8_t *redir_buf, int32_t redir_len)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, path)
-    m3ApiGetArg(int32_t, path_len)
-    m3ApiGetArgMem(const char *, args_buf)
-    m3ApiGetArg(int32_t, args_len)
-    m3ApiGetArg(int32_t, argc)
-    m3ApiGetArgMem(const uint8_t *, redir_buf)
-    m3ApiGetArg(int32_t, redir_len)
-    m3ApiCheckMem(path, path_len);
-    if (args_len > 0)
-        m3ApiCheckMem(args_buf, args_len);
-    if (redir_len > 0)
-        m3ApiCheckMem(redir_buf, redir_len);
-
     char pathbuf[256];
     int copy_len = path_len < 255 ? path_len : 255;
     memcpy(pathbuf, path, copy_len);
@@ -830,54 +894,38 @@ m3ApiRawFunction(wasm_api_spawn_redirected)
         setup_count++;
     }
 
-    wasm_process_t *proc = WASM_PROC(_ctx);
-    int32_t pid = wasm_spawn_redirected(pathbuf, actual_argc, argv, proc->pid,
-                                        setups, setup_count);
-    m3ApiReturn(pid);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
+    return wasm_spawn_redirected(pathbuf, actual_argc, argv, proc->pid,
+                                 setups, setup_count);
 }
 
-/* --- TTY APIs --- */
-
-m3ApiRawFunction(wasm_api_tty_set_mode)
+static int32_t wasm_api_tty_set_mode(wasm_exec_env_t exec_env, int32_t mode)
 {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, mode)
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     tty_t *tty = tty_get(proc->tty_id);
-    int prev = tty_set_mode(tty, mode ? TTY_MODE_RAW : TTY_MODE_COOKED);
-    m3ApiReturn(prev);
+    return tty_set_mode(tty, mode ? TTY_MODE_RAW : TTY_MODE_COOKED);
 }
 
-m3ApiRawFunction(wasm_api_tty_get_size)
+static int32_t wasm_api_tty_get_size(wasm_exec_env_t exec_env)
 {
-    m3ApiReturnType(int32_t)
-    wasm_process_t *proc = WASM_PROC(_ctx);
+    wasm_process_t *proc = WAMR_PROC(exec_env);
     tty_t *tty = tty_get(proc->tty_id);
-    m3ApiReturn((int32_t)((tty->rows << 16) | (tty->cols & 0xFFFF)));
+    return (int32_t)((tty->rows << 16) | (tty->cols & 0xFFFF));
 }
 
-/* --- Graphics APIs --- */
-
-m3ApiRawFunction(wasm_api_fb_info)
+static void wasm_api_fb_info(wasm_exec_env_t exec_env, uint32_t *buf)
 {
-    m3ApiGetArgMem(uint32_t *, buf)
-    m3ApiCheckMem(buf, 16);
+    (void)exec_env;
     buf[0] = (uint32_t)fb->width;
     buf[1] = (uint32_t)fb->height;
     buf[2] = (uint32_t)(fb->width * 4);
     buf[3] = 32;
-    m3ApiSuccess();
 }
 
-m3ApiRawFunction(wasm_api_fb_alloc)
+static uint32_t wasm_api_fb_alloc(wasm_exec_env_t exec_env, uint32_t w, uint32_t h)
 {
-    m3ApiReturnType(uint32_t)
-    m3ApiGetArg(uint32_t, w)
-    m3ApiGetArg(uint32_t, h)
-
     uint32_t needed = w * h * 4;
-    uint32_t current_size;
-    m3_GetMemory(runtime, &current_size, 0);
+    uint32_t current_size = wamr_memory_size(exec_env);
 
     uint32_t alloc_offset = (current_size + 15) & ~15u;
     uint32_t total_needed = alloc_offset + needed;
@@ -885,27 +933,24 @@ m3ApiRawFunction(wasm_api_fb_alloc)
     uint32_t current_pages = current_size / 65536;
 
     if (pages_needed > current_pages) {
-        M3Result res = ResizeMemory(runtime, pages_needed);
-        if (res)
-            m3ApiTrap("fb_alloc: failed to grow memory");
+        if (!wamr_enlarge_memory(exec_env, pages_needed)) {
+            wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+            wasm_runtime_set_exception(inst, "fb_alloc: failed to grow memory");
+            return 0;
+        }
     }
 
-    m3ApiReturn(alloc_offset);
+    return alloc_offset;
 }
 
-m3ApiRawFunction(wasm_api_fb_flush)
+static void wasm_api_fb_flush(wasm_exec_env_t exec_env, uint32_t src_offset,
+                               uint32_t dst_x, uint32_t dst_y,
+                               uint32_t w, uint32_t h, uint32_t src_pitch)
 {
-    m3ApiGetArg(uint32_t, src_offset)
-    m3ApiGetArg(uint32_t, dst_x)
-    m3ApiGetArg(uint32_t, dst_y)
-    m3ApiGetArg(uint32_t, w)
-    m3ApiGetArg(uint32_t, h)
-    m3ApiGetArg(uint32_t, src_pitch)
-
-    uint32_t mem_size;
-    uint8_t *mem = m3_GetMemory(runtime, &mem_size, 0);
+    uint32_t mem_size = wamr_memory_size(exec_env);
+    uint8_t *mem = wamr_memory_data(exec_env);
     if (!mem || src_offset + h * src_pitch > mem_size)
-        m3ApiTrap("out of bounds framebuffer access");
+        return;
 
     uint8_t *src = mem + src_offset;
     uint32_t fb_pitch = fb->pitch;
@@ -921,50 +966,54 @@ m3ApiRawFunction(wasm_api_fb_flush)
         src += src_pitch;
         dst += fb_pitch;
     }
-    m3ApiSuccess();
 }
 
-m3ApiRawFunction(wasm_api_fb_sync)
+static void wasm_api_fb_sync(wasm_exec_env_t exec_env)
 {
-    m3ApiSuccess();
+    (void)exec_env;
 }
 
-/* --- Link all APIs --- */
+static NativeSymbol env_symbols[] = {
+    { "print",              (void *)wasm_api_print,             "(*~)",         NULL },
+    { "putchar",            (void *)wasm_api_putchar,           "(i)",          NULL },
+    { "get_ticks",          (void *)wasm_api_get_ticks,         "()I",          NULL },
+    { "exit",               (void *)wasm_api_exit,              "(i)",          NULL },
+    { "get_argc",           (void *)wasm_api_get_argc,          "()i",          NULL },
+    { "get_argv",           (void *)wasm_api_get_argv,          "(i*~)i",       NULL },
+    { "getchar",            (void *)wasm_api_getchar,           "()i",          NULL },
+    { "read_line",          (void *)wasm_api_read_line,         "(*~)i",        NULL },
+    { "open",               (void *)wasm_api_open,              "(*~i)i",       NULL },
+    { "close",              (void *)wasm_api_close,             "(i)i",         NULL },
+    { "read",               (void *)wasm_api_read,              "(i*~)i",       NULL },
+    { "write",              (void *)wasm_api_write,             "(i*~)i",       NULL },
+    { "seek",               (void *)wasm_api_seek,              "(iii)i",       NULL },
+    { "stat",               (void *)wasm_api_stat,              "(*~*)i",       NULL },
+    { "readdir",            (void *)wasm_api_readdir,           "(*~*~)i",      NULL },
+    { "mkdir",              (void *)wasm_api_mkdir,             "(*~)i",        NULL },
+    { "unlink",             (void *)wasm_api_unlink,            "(*~)i",        NULL },
+    { "rmdir",              (void *)wasm_api_rmdir,             "(*~)i",        NULL },
+    { "spawn",              (void *)wasm_api_spawn,             "(*~*~i)i",     NULL },
+    { "waitpid",            (void *)wasm_api_waitpid,           "(i)i",         NULL },
+    { "kill",               (void *)wasm_api_kill,              "(i)i",         NULL },
+    { "ptrace",             (void *)wasm_api_ptrace,            "(iiii)i",      NULL },
+    { "wait4",              (void *)wasm_api_wait4,             "(i*)i",        NULL },
+    { "getpid",             (void *)wasm_api_getpid,            "()i",          NULL },
+    { "dup2",               (void *)wasm_api_dup2,              "(ii)i",        NULL },
+    { "pipe",               (void *)wasm_api_pipe,              "(*)i",         NULL },
+    { "pipe_create",        (void *)wasm_api_pipe_create,       "()i",          NULL },
+    { "pipe_close_read",    (void *)wasm_api_pipe_close_read,   "(i)i",         NULL },
+    { "pipe_close_write",   (void *)wasm_api_pipe_close_write,  "(i)i",         NULL },
+    { "spawn_redirected",   (void *)wasm_api_spawn_redirected,  "(*~*~i*~)i",   NULL },
+    { "tty_set_mode",       (void *)wasm_api_tty_set_mode,      "(i)i",         NULL },
+    { "tty_get_size",       (void *)wasm_api_tty_get_size,      "()i",          NULL },
+    { "fb_info",            (void *)wasm_api_fb_info,           "(*)",          NULL },
+    { "fb_alloc",           (void *)wasm_api_fb_alloc,          "(ii)i",        NULL },
+    { "fb_flush",           (void *)wasm_api_fb_flush,          "(iiiiii)",     NULL },
+    { "fb_sync",            (void *)wasm_api_fb_sync,           "()",           NULL },
+};
 
-void wasm_link_api(IM3Module module, wasm_process_t *proc)
+void wasm_register_env_natives(void)
 {
-    m3_LinkRawFunctionEx(module, "env", "print", "v(*i)", &wasm_api_print, proc);
-    m3_LinkRawFunctionEx(module, "env", "putchar", "v(i)", &wasm_api_putchar, proc);
-    m3_LinkRawFunctionEx(module, "env", "get_ticks", "I()", &wasm_api_get_ticks, proc);
-    m3_LinkRawFunctionEx(module, "env", "exit", "v(i)", &wasm_api_exit, proc);
-    m3_LinkRawFunctionEx(module, "env", "get_argc", "i()", &wasm_api_get_argc, proc);
-    m3_LinkRawFunctionEx(module, "env", "get_argv", "i(i*i)", &wasm_api_get_argv, proc);
-    m3_LinkRawFunctionEx(module, "env", "getchar", "i()", &wasm_api_getchar, proc);
-    m3_LinkRawFunctionEx(module, "env", "read_line", "i(*i)", &wasm_api_read_line, proc);
-    m3_LinkRawFunctionEx(module, "env", "open", "i(*ii)", &wasm_api_open, proc);
-    m3_LinkRawFunctionEx(module, "env", "close", "i(i)", &wasm_api_close, proc);
-    m3_LinkRawFunctionEx(module, "env", "read", "i(i*i)", &wasm_api_read, proc);
-    m3_LinkRawFunctionEx(module, "env", "write", "i(i*i)", &wasm_api_write, proc);
-    m3_LinkRawFunctionEx(module, "env", "seek", "i(iii)", &wasm_api_seek, proc);
-    m3_LinkRawFunctionEx(module, "env", "stat", "i(*i*)", &wasm_api_stat, proc);
-    m3_LinkRawFunctionEx(module, "env", "readdir", "i(*i*i)", &wasm_api_readdir, proc);
-    m3_LinkRawFunctionEx(module, "env", "mkdir", "i(*i)", &wasm_api_mkdir, proc);
-    m3_LinkRawFunctionEx(module, "env", "unlink", "i(*i)", &wasm_api_unlink, proc);
-    m3_LinkRawFunctionEx(module, "env", "rmdir", "i(*i)", &wasm_api_rmdir, proc);
-    m3_LinkRawFunctionEx(module, "env", "spawn", "i(*i*ii)", &wasm_api_spawn, proc);
-    m3_LinkRawFunctionEx(module, "env", "waitpid", "i(i)", &wasm_api_waitpid, proc);
-    m3_LinkRawFunctionEx(module, "env", "kill", "i(i)", &wasm_api_kill, proc);
-    m3_LinkRawFunctionEx(module, "env", "getpid", "i()", &wasm_api_getpid, proc);
-    m3_LinkRawFunctionEx(module, "env", "dup2", "i(ii)", &wasm_api_dup2, proc);
-    m3_LinkRawFunctionEx(module, "env", "pipe", "i(*)", &wasm_api_pipe, proc);
-    m3_LinkRawFunctionEx(module, "env", "pipe_create", "i()", &wasm_api_pipe_create, proc);
-    m3_LinkRawFunctionEx(module, "env", "pipe_close_read", "i(i)", &wasm_api_pipe_close_read, proc);
-    m3_LinkRawFunctionEx(module, "env", "pipe_close_write", "i(i)", &wasm_api_pipe_close_write, proc);
-    m3_LinkRawFunctionEx(module, "env", "spawn_redirected", "i(*i*ii*i)", &wasm_api_spawn_redirected, proc);
-    m3_LinkRawFunctionEx(module, "env", "tty_set_mode", "i(i)", &wasm_api_tty_set_mode, proc);
-    m3_LinkRawFunctionEx(module, "env", "tty_get_size", "i()", &wasm_api_tty_get_size, proc);
-    m3_LinkRawFunctionEx(module, "env", "fb_info", "v(*)", &wasm_api_fb_info, proc);
-    m3_LinkRawFunctionEx(module, "env", "fb_alloc", "i(ii)", &wasm_api_fb_alloc, proc);
-    m3_LinkRawFunctionEx(module, "env", "fb_flush", "v(iiiiii)", &wasm_api_fb_flush, proc);
-    m3_LinkRawFunctionEx(module, "env", "fb_sync", "v()", &wasm_api_fb_sync, proc);
+    wasm_runtime_register_natives("env", env_symbols,
+                                  sizeof(env_symbols) / sizeof(NativeSymbol));
 }

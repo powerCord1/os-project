@@ -8,6 +8,7 @@
 #include <prediction.h>
 #include <stdio.h>
 
+#include <process.h>
 #include <scheduler.h>
 
 #define PIT_FREQUENCY 1000
@@ -44,6 +45,8 @@ uint64_t pit_handler(uint64_t rsp)
 {
     unlikely_warn(++pit_ticks == UINT64_MAX,
                   "PIT tick overflow, system may be unstable");
+
+    wali_check_timers();
 
     return scheduler_schedule(rsp);
 }

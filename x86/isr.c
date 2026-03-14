@@ -174,7 +174,11 @@ void double_fault_handler(interrupt_frame_t *frame)
 
 void gpf_handler(interrupt_frame_t *frame)
 {
-    panic("General protection fault");
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "GPF\nRIP: 0x%016lx\nError: 0x%lx\nRSP: 0x%016lx\n",
+             frame->rip, frame->error_code, frame->rsp);
+    panic(buf);
 }
 
 void seg_fault_handler(interrupt_frame_t *frame)

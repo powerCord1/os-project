@@ -10,7 +10,10 @@
 #include <fs.h>
 #include <heap.h>
 #include <panic.h>
+#include <pit.h>
 #include <power.h>
+#include <process.h>
+#include <scheduler.h>
 #include <serial.h>
 #include <shell.h>
 #include <sound.h>
@@ -513,7 +516,43 @@ void cmd_wasm(int argc, char **argv)
         printf("Usage: wasm <file> [args...]\n");
         return;
     }
-    int ret = wasm_run_file(argv[1], argc - 1, argv + 1);
+
+    int32_t pid = wasm_spawn(argv[1], argc - 1, argv + 1, 0);
+    if (pid < 0) {
+        printf("Failed to start '%s'\n", argv[1]);
+        return;
+    }
+
+    proc_entry_t *entry = proc_get(pid);
+    while (entry && entry->state != PROC_EXITED)
+        scheduler_yield();
+
+    int ret = entry ? entry->exit_code : -1;
+    proc_free(pid);
     if (ret != 0)
         printf("Exit code: %d\n", ret);
+}
+
+static void thread_test_func(void *arg)
+{
+    int id = (int)(intptr_t)arg;
+    uint64_t delay = (id == 1) ? 1000 : 500;
+    for (int i = 0; i < 5; i++) {
+        printf("thread %d: %d\n", id, i);
+        uint64_t start = pit_ticks;
+        while (pit_ticks - start < delay)
+            scheduler_yield();
+    }
+    printf("thread %d: done\n", id);
+}
+
+void cmd_threadtest(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    printf("Spawning 2 threads...\n");
+    thread_t *t1 = thread_create(thread_test_func, (void *)(intptr_t)1);
+    thread_t *t2 = thread_create(thread_test_func, (void *)(intptr_t)2);
+    wait_for_thread(t1->id);
+    wait_for_thread(t2->id);
+    printf("All threads finished\n");
 }

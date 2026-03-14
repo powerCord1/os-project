@@ -44,20 +44,27 @@ static void thread_wrapper(void (*entry)(void *), void *arg)
 thread_t *thread_create(void (*entry)(void *), void *arg)
 {
     thread_t *thread = malloc(sizeof(thread_t));
+    if (!thread)
+        return NULL;
     thread->id = next_thread_id++;
     thread->state = THREAD_STATE_READY;
     thread->stack_base = malloc(THREAD_STACK_SIZE);
+    if (!thread->stack_base) {
+        free(thread);
+        return NULL;
+    }
 
-    // Set up the initial stack
-    uint64_t *stack =
-        (uint64_t *)((uint8_t *)thread->stack_base + THREAD_STACK_SIZE);
+    // Set up the initial stack, aligned to 16 bytes
+    uint64_t *stack = (uint64_t *)(((uintptr_t)thread->stack_base
+        + THREAD_STACK_SIZE) & ~(uintptr_t)0xF);
 
-    // Push initial context onto stack
-    // We want it to look like it was interrupted at the start of thread_wrapper
+    // iretq loads RSP from the interrupt frame. x86-64 ABI requires
+    // RSP = 8 mod 16 at function entry (as if call pushed a return address).
+    uint64_t thread_rsp = (uint64_t)stack - 8;
 
     // CPU state (pushed by hardware on interrupt)
     *(--stack) = 0x10;                     // SS
-    *(--stack) = (uint64_t)stack;          // RSP
+    *(--stack) = thread_rsp;               // RSP
     *(--stack) = 0x202;                    // RFLAGS (IF enabled)
     *(--stack) = 0x08;                     // CS
     *(--stack) = (uint64_t)thread_wrapper; // RIP
