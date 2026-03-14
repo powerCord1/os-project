@@ -32,8 +32,25 @@ extern void isr_virtualisation();
 extern void isr_control_protection();
 extern void isr_unhandled();
 extern void isr_security_protection();
-extern void isr_pit();
-extern void isr_keyboard();
+extern void isr_lapic_timer();
+extern void isr_lapic_ipi_sched();
+extern void isr_lapic_spurious();
+extern void isr_lapic_irq0();
+extern void isr_lapic_irq1();
+extern void isr_lapic_irq2();
+extern void isr_lapic_irq3();
+extern void isr_lapic_irq4();
+extern void isr_lapic_irq5();
+extern void isr_lapic_irq6();
+extern void isr_lapic_irq7();
+extern void isr_lapic_irq8();
+extern void isr_lapic_irq9();
+extern void isr_lapic_irq10();
+extern void isr_lapic_irq11();
+extern void isr_lapic_irq12();
+extern void isr_lapic_irq13();
+extern void isr_lapic_irq14();
+extern void isr_lapic_irq15();
 
 static const char *exceptions[] = {
     "Divide Error",

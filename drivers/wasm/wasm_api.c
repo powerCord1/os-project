@@ -243,7 +243,12 @@ static int32_t wasm_api_getchar(wasm_exec_env_t exec_env)
             wasm_runtime_set_exception(inst, "wali exit");
             return -1;
         }
-        waitqueue_sleep(&tty->input_wq);
+        waitqueue_begin_sleep(&tty->input_wq);
+        if (tty_input_pop(tty, &c)) {
+            waitqueue_cancel_sleep(&tty->input_wq);
+            break;
+        }
+        waitqueue_end_sleep(&tty->input_wq);
     }
     if (c == '\x03') {
         proc->exit_code = 130;
@@ -271,7 +276,12 @@ static int32_t wasm_api_read_line(wasm_exec_env_t exec_env, char *buf, int32_t m
                 wasm_runtime_set_exception(inst, "wali exit");
                 return -1;
             }
-            waitqueue_sleep(&tty->input_wq);
+            waitqueue_begin_sleep(&tty->input_wq);
+            if (tty_input_pop(tty, &c)) {
+                waitqueue_cancel_sleep(&tty->input_wq);
+                break;
+            }
+            waitqueue_end_sleep(&tty->input_wq);
         }
         if (c == '\x03') {
             proc->exit_code = 130;
@@ -400,7 +410,12 @@ static int32_t wasm_api_read(wasm_exec_env_t exec_env, int32_t fd,
                     wasm_runtime_set_exception(inst, "wali exit");
                     return -1;
                 }
-                waitqueue_sleep(&tty->input_wq);
+                waitqueue_begin_sleep(&tty->input_wq);
+                if (tty_input_pop(tty, &c)) {
+                    waitqueue_cancel_sleep(&tty->input_wq);
+                    break;
+                }
+                waitqueue_end_sleep(&tty->input_wq);
             }
             if (c == '\x03') {
                 proc->exit_code = 130;
@@ -665,8 +680,14 @@ static int32_t wasm_api_waitpid(wasm_exec_env_t exec_env, int32_t pid)
     proc_entry_t *e = proc_get(pid);
     if (!e)
         return -1;
-    while (e->state != PROC_EXITED)
-        waitqueue_sleep(&e->exit_wq);
+    while (true) {
+        waitqueue_begin_sleep(&e->exit_wq);
+        if (e->state == PROC_EXITED) {
+            waitqueue_cancel_sleep(&e->exit_wq);
+            break;
+        }
+        waitqueue_end_sleep(&e->exit_wq);
+    }
     int32_t code = e->exit_code;
     proc_free(pid);
     return code;
@@ -736,8 +757,14 @@ static int32_t wasm_api_wait4(wasm_exec_env_t exec_env, int32_t pid,
     if (!e)
         return -1;
 
-    while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
-        waitqueue_sleep(&e->ptrace_wq);
+    while (true) {
+        waitqueue_begin_sleep(&e->ptrace_wq);
+        if (e->state == PROC_STOPPED || e->state == PROC_EXITED) {
+            waitqueue_cancel_sleep(&e->ptrace_wq);
+            break;
+        }
+        waitqueue_end_sleep(&e->ptrace_wq);
+    }
 
     if (wstatus) {
         if (e->state == PROC_STOPPED)

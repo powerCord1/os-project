@@ -1,44 +1,59 @@
 #include <debug.h>
 #include <heap.h>
 #include <interrupts.h>
+#include <lock.h>
 #include <scheduler.h>
+#include <smp.h>
 #include <string.h>
 
-#define THREAD_STACK_SIZE 16384 // 16 KB
+#define THREAD_STACK_SIZE 16384
 
-static thread_t *current_thread = NULL;
 static thread_t *ready_list = NULL;
 static uint64_t next_thread_id = 0;
 static bool scheduler_running = false;
+static spinlock_t sched_lock = {0, "sched"};
+
+static thread_t *get_current_thread(void)
+{
+    cpu_t *cpu = smp_get_current_cpu();
+    return cpu ? cpu->current_thread : NULL;
+}
+
+static void set_current_thread(thread_t *t)
+{
+    cpu_t *cpu = smp_get_current_cpu();
+    if (cpu)
+        cpu->current_thread = t;
+}
 
 void scheduler_init()
 {
     log_info("Initializing scheduler");
 
-    // Create the "initial" thread which represents the current execution flow
-    // (kernel main)
     thread_t *initial_thread = malloc(sizeof(thread_t));
     initial_thread->id = next_thread_id++;
     initial_thread->state = THREAD_STATE_RUNNING;
     initial_thread->stack_base = NULL;
-    initial_thread->next = initial_thread; // Circular list
+    initial_thread->next = initial_thread;
 
-    current_thread = initial_thread;
     ready_list = initial_thread;
+
+    // BSP's current_thread is set once SMP init sets up GS base.
+    // For now store it so smp_init can pick it up.
+    set_current_thread(initial_thread);
 }
 
 static void thread_wrapper(void (*entry)(void *), void *arg)
 {
-    enable_interrupts(); // Threads should start with interrupts enabled
+    enable_interrupts();
     entry(arg);
 
     disable_interrupts();
-    current_thread->state = THREAD_STATE_TERMINATED;
+    get_current_thread()->state = THREAD_STATE_TERMINATED;
     scheduler_yield();
 
-    while (1) {
+    while (1)
         __asm__ volatile("hlt");
-    }
 }
 
 thread_t *thread_create(void (*entry)(void *), void *arg)
@@ -46,7 +61,11 @@ thread_t *thread_create(void (*entry)(void *), void *arg)
     thread_t *thread = malloc(sizeof(thread_t));
     if (!thread)
         return NULL;
+
+    spinlock_acquire_irq(&sched_lock);
     thread->id = next_thread_id++;
+    spinlock_release_irq(&sched_lock);
+
     thread->state = THREAD_STATE_READY;
     thread->stack_base = malloc(THREAD_STACK_SIZE);
     if (!thread->stack_base) {
@@ -54,24 +73,19 @@ thread_t *thread_create(void (*entry)(void *), void *arg)
         return NULL;
     }
 
-    // Set up the initial stack, aligned to 16 bytes
     uint64_t *stack = (uint64_t *)(((uintptr_t)thread->stack_base
         + THREAD_STACK_SIZE) & ~(uintptr_t)0xF);
 
-    // iretq loads RSP from the interrupt frame. x86-64 ABI requires
-    // RSP = 8 mod 16 at function entry (as if call pushed a return address).
     uint64_t thread_rsp = (uint64_t)stack - 8;
 
-    // CPU state (pushed by hardware on interrupt)
     *(--stack) = 0x10;                     // SS
     *(--stack) = thread_rsp;               // RSP
     *(--stack) = 0x202;                    // RFLAGS (IF enabled)
     *(--stack) = 0x08;                     // CS
     *(--stack) = (uint64_t)thread_wrapper; // RIP
 
-    // Pushed by IRQ_HANDLER macro (15 registers)
-    *(--stack) = (uint64_t)entry; // RDI (1st arg to thread_wrapper)
-    *(--stack) = (uint64_t)arg;   // RSI (2nd arg to thread_wrapper)
+    *(--stack) = (uint64_t)entry; // RDI
+    *(--stack) = (uint64_t)arg;   // RSI
     *(--stack) = 0;               // RDX
     *(--stack) = 0;               // RCX
     *(--stack) = 0;               // RBX
@@ -88,42 +102,55 @@ thread_t *thread_create(void (*entry)(void *), void *arg)
 
     thread->rsp = (uint64_t)stack;
 
-    // Add to circular ready list
-    disable_interrupts();
+    spinlock_acquire_irq(&sched_lock);
     thread->next = ready_list->next;
     ready_list->next = thread;
-    enable_interrupts();
+    spinlock_release_irq(&sched_lock);
 
     return thread;
 }
 
 uint64_t scheduler_schedule(uint64_t current_rsp)
 {
-    if (!scheduler_running || !current_thread) {
+    if (!scheduler_running)
         return current_rsp;
-    }
 
-    current_thread->rsp = current_rsp;
+    thread_t *cur = get_current_thread();
+    if (!cur)
+        return current_rsp;
 
-    // Pick next ready thread
-    thread_t *next = current_thread->next;
+    spinlock_acquire_irq(&sched_lock);
+
+    cur->rsp = current_rsp;
+
+    thread_t *next = cur->next;
     while (next->state != THREAD_STATE_READY &&
            next->state != THREAD_STATE_RUNNING) {
         next = next->next;
-        if (next == current_thread) {
-            break; // All other threads are not ready
-        }
+        if (next == cur)
+            break;
     }
 
-    current_thread = next;
-    current_thread->state = THREAD_STATE_RUNNING;
+    if (next == cur && cur->state != THREAD_STATE_READY &&
+        cur->state != THREAD_STATE_RUNNING) {
+        spinlock_release_irq(&sched_lock);
+        return current_rsp;
+    }
 
-    return current_thread->rsp;
+    if (cur->state == THREAD_STATE_RUNNING)
+        cur->state = THREAD_STATE_READY;
+
+    set_current_thread(next);
+    next->state = THREAD_STATE_RUNNING;
+
+    spinlock_release_irq(&sched_lock);
+
+    return next->rsp;
 }
 
 void scheduler_yield()
 {
-    __asm__ volatile("int $0x20"); // Trigger PIT IRQ
+    __asm__ volatile("int $0x20");
 }
 
 void scheduler_start()
@@ -134,7 +161,7 @@ void scheduler_start()
 
 void thread_cancel(uint64_t id)
 {
-    disable_interrupts();
+    spinlock_acquire_irq(&sched_lock);
     thread_t *thread = ready_list;
     bool found = false;
     if (thread != NULL) {
@@ -147,32 +174,39 @@ void thread_cancel(uint64_t id)
             thread = thread->next;
         } while (thread != ready_list);
     }
+    spinlock_release_irq(&sched_lock);
 
-    if (found && current_thread->id == id) {
+    if (found && get_current_thread()->id == id) {
         scheduler_yield();
-        // Should not reach here
         log_err("Thread %lu failed to yield after cancellation", id);
-        while (1) {
+        while (1)
             __asm__ volatile("hlt");
-        }
     }
-    enable_interrupts();
 }
 
 uint64_t scheduler_get_current_id(void)
 {
-    return current_thread ? current_thread->id : 0;
+    thread_t *cur = get_current_thread();
+    return cur ? cur->id : 0;
 }
 
 void scheduler_block_current(void)
 {
-    if (current_thread)
-        current_thread->state = THREAD_STATE_BLOCKED;
+    thread_t *cur = get_current_thread();
+    if (cur)
+        cur->state = THREAD_STATE_BLOCKED;
+}
+
+void scheduler_unblock_current(void)
+{
+    thread_t *cur = get_current_thread();
+    if (cur && cur->state == THREAD_STATE_BLOCKED)
+        cur->state = THREAD_STATE_RUNNING;
 }
 
 void scheduler_unblock(uint64_t id)
 {
-    disable_interrupts();
+    spinlock_acquire_irq(&sched_lock);
     thread_t *thread = ready_list;
     if (thread) {
         do {
@@ -183,13 +217,13 @@ void scheduler_unblock(uint64_t id)
             thread = thread->next;
         } while (thread != ready_list);
     }
-    enable_interrupts();
+    spinlock_release_irq(&sched_lock);
 }
 
 void wait_for_thread(uint64_t id)
 {
     while (true) {
-        disable_interrupts();
+        spinlock_acquire_irq(&sched_lock);
         thread_t *thread = ready_list;
         bool still_exists = false;
 
@@ -204,11 +238,10 @@ void wait_for_thread(uint64_t id)
             } while (thread != ready_list);
         }
 
-        enable_interrupts();
+        spinlock_release_irq(&sched_lock);
 
-        if (!still_exists) {
+        if (!still_exists)
             break;
-        }
 
         scheduler_yield();
     }
@@ -216,27 +249,34 @@ void wait_for_thread(uint64_t id)
 
 void wait_for_all_threads()
 {
-    disable_interrupts();
+    spinlock_acquire_irq(&sched_lock);
     thread_t *start_node = ready_list;
     thread_t *current = start_node;
 
     if (current == NULL) {
-        enable_interrupts();
+        spinlock_release_irq(&sched_lock);
         return;
     }
 
-    // Collect IDs first to avoid issues if the list structure changes
-    // during yields (though in this simple scheduler it's circular)
     do {
         uint64_t id = current->id;
-        // Don't wait for the current execution flow (kernel main/initial thread)
         if (id != 0) {
-            enable_interrupts();
+            spinlock_release_irq(&sched_lock);
             wait_for_thread(id);
-            disable_interrupts();
+            spinlock_acquire_irq(&sched_lock);
         }
         current = current->next;
     } while (current != start_node);
 
-    enable_interrupts();
+    spinlock_release_irq(&sched_lock);
+}
+
+void scheduler_set_initial_thread(thread_t *thread)
+{
+    set_current_thread(thread);
+}
+
+thread_t *scheduler_get_initial_thread(void)
+{
+    return ready_list;
 }

@@ -147,8 +147,14 @@ os_thread_join(korp_tid thread, void **value_ptr)
         return BHT_OK;
     }
 
-    while (!td->done)
-        waitqueue_sleep(&td->join_wq);
+    while (true) {
+        waitqueue_begin_sleep(&td->join_wq);
+        if (td->done) {
+            waitqueue_cancel_sleep(&td->join_wq);
+            break;
+        }
+        waitqueue_end_sleep(&td->join_wq);
+    }
 
     if (value_ptr)
         *value_ptr = td->ret;
@@ -204,8 +210,9 @@ os_cond_destroy(korp_cond *cond)
 int
 os_cond_wait(korp_cond *cond, korp_mutex *mutex)
 {
+    waitqueue_begin_sleep(&cond->wq);
     spinlock_release(mutex);
-    waitqueue_sleep(&cond->wq);
+    waitqueue_end_sleep(&cond->wq);
     spinlock_acquire(mutex);
     return BHT_OK;
 }

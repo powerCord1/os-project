@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include <io.h>
+#include <ioapic.h>
 #include <pic.h>
 
 #define PIC1 0x20 /* IO base address for master PIC */
@@ -78,6 +79,11 @@ void pic_disable()
 
 void irq_set_mask(uint8_t IRQline)
 {
+    if (ioapic_active) {
+        ioapic_mask_irq(IRQline);
+        return;
+    }
+
     uint16_t port;
     uint8_t value;
 
@@ -93,6 +99,11 @@ void irq_set_mask(uint8_t IRQline)
 
 void irq_clear_mask(uint8_t IRQline)
 {
+    if (ioapic_active) {
+        ioapic_unmask_irq(IRQline);
+        return;
+    }
+
     uint16_t port;
     uint8_t value;
 

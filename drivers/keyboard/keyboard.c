@@ -33,6 +33,12 @@ void kbd_init()
     log_verbose("Setting typematic rate, rate: %d, delay: %d",
                 KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
     kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
+    // Drain stale ACK bytes left by LED/typematic commands above.
+    // The 8042 output buffer holds unread data, keeping IRQ 1 HIGH.
+    // Edge-triggered IOAPIC won't fire until the line goes LOW first.
+    while (inb(KBD_STATUS_PORT) & 1)
+        inb(KBD_DATA_PORT);
+
     log_verbose("Installing keyboard handler");
     irq_install_handler(IRQ_TYPE_KEYBOARD,
                         (uint64_t (*)(uint64_t, void *))keyboard_handler, NULL);

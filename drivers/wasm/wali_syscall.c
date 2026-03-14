@@ -41,8 +41,14 @@ static void ptrace_notify_entry(wasm_exec_env_t exec_env, int32_t nr,
 
     e->state = PROC_STOPPED;
     waitqueue_wake_one(&e->ptrace_wq);
-    while (e->state == PROC_STOPPED)
-        waitqueue_sleep(&e->exit_wq);
+    while (true) {
+        waitqueue_begin_sleep(&e->exit_wq);
+        if (e->state != PROC_STOPPED) {
+            waitqueue_cancel_sleep(&e->exit_wq);
+            break;
+        }
+        waitqueue_end_sleep(&e->exit_wq);
+    }
 }
 
 static void ptrace_notify_exit(wasm_exec_env_t exec_env, int64_t ret)
@@ -56,8 +62,14 @@ static void ptrace_notify_exit(wasm_exec_env_t exec_env, int64_t ret)
 
     e->state = PROC_STOPPED;
     waitqueue_wake_one(&e->ptrace_wq);
-    while (e->state == PROC_STOPPED)
-        waitqueue_sleep(&e->exit_wq);
+    while (true) {
+        waitqueue_begin_sleep(&e->exit_wq);
+        if (e->state != PROC_STOPPED) {
+            waitqueue_cancel_sleep(&e->exit_wq);
+            break;
+        }
+        waitqueue_end_sleep(&e->exit_wq);
+    }
 }
 
 #define PTRACE_ENTER(env, nr, ...) ptrace_notify_entry(env, nr, __VA_ARGS__)
@@ -320,8 +332,14 @@ static int64_t wali_do_read(wasm_process_t *proc, int32_t fd,
                     e->sig_pending = 0;
                     return i > 0 ? (int64_t)i : -L_EINTR;
                 }
-                waitqueue_sleep(&tty->input_wq);
+                waitqueue_begin_sleep(&tty->input_wq);
+                if (tty_input_pop(tty, &c)) {
+                    waitqueue_cancel_sleep(&tty->input_wq);
+                    goto got_char;
+                }
+                waitqueue_end_sleep(&tty->input_wq);
             }
+            got_char:
             if (c == '\x03')
                 return -L_EINTR;
             if (c == '\x04')
@@ -1693,7 +1711,12 @@ static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
 
         if (timeout < 0) {
             tty_t *tty = tty_get(proc->tty_id);
-            waitqueue_sleep(&tty->input_wq);
+            waitqueue_begin_sleep(&tty->input_wq);
+            if (tty->input_head != tty->input_tail) {
+                waitqueue_cancel_sleep(&tty->input_wq);
+            } else {
+                waitqueue_end_sleep(&tty->input_wq);
+            }
         } else {
             if (pit_ticks >= deadline)
                 break;
@@ -1776,7 +1799,12 @@ static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
 
         if (timeout_ms < 0) {
             tty_t *tty = tty_get(proc->tty_id);
-            waitqueue_sleep(&tty->input_wq);
+            waitqueue_begin_sleep(&tty->input_wq);
+            if (tty->input_head != tty->input_tail) {
+                waitqueue_cancel_sleep(&tty->input_wq);
+            } else {
+                waitqueue_end_sleep(&tty->input_wq);
+            }
         } else {
             if (pit_ticks >= deadline)
                 break;
@@ -2107,7 +2135,12 @@ static int64_t wali_sys_pselect6(wasm_exec_env_t exec_env, int32_t nfds,
 
         if (timeout_ms < 0) {
             tty_t *tty = tty_get(proc->tty_id);
-            waitqueue_sleep(&tty->input_wq);
+            waitqueue_begin_sleep(&tty->input_wq);
+            if (tty->input_head != tty->input_tail) {
+                waitqueue_cancel_sleep(&tty->input_wq);
+            } else {
+                waitqueue_end_sleep(&tty->input_wq);
+            }
         } else {
             if (pit_ticks >= deadline)
                 break;
@@ -2306,8 +2339,14 @@ static int64_t wali_sys_wait4(wasm_exec_env_t exec_env, int32_t pid,
         if (e->state != PROC_STOPPED && e->state != PROC_EXITED)
             return 0;
     } else {
-        while (e->state != PROC_STOPPED && e->state != PROC_EXITED)
-            waitqueue_sleep(&e->exit_wq);
+        while (true) {
+            waitqueue_begin_sleep(&e->exit_wq);
+            if (e->state == PROC_STOPPED || e->state == PROC_EXITED) {
+                waitqueue_cancel_sleep(&e->exit_wq);
+                break;
+            }
+            waitqueue_end_sleep(&e->exit_wq);
+        }
     }
 
 fill_status:
@@ -2474,7 +2513,12 @@ static int64_t wali_sys_select(wasm_exec_env_t exec_env, int32_t nfds,
 
         if (timeout_ms < 0) {
             tty_t *tty = tty_get(proc->tty_id);
-            waitqueue_sleep(&tty->input_wq);
+            waitqueue_begin_sleep(&tty->input_wq);
+            if (tty->input_head != tty->input_tail) {
+                waitqueue_cancel_sleep(&tty->input_wq);
+            } else {
+                waitqueue_end_sleep(&tty->input_wq);
+            }
         } else {
             if (pit_ticks >= deadline)
                 break;
@@ -2806,11 +2850,15 @@ static int64_t wali_sys_getrusage(wasm_exec_env_t exec_env, int32_t who,
     return -L_ENOSYS;
 }
 
-static int64_t wali_sys_sysinfo(wasm_exec_env_t exec_env, int32_t info)
+static int64_t wali_sys_sysinfo(wasm_exec_env_t exec_env, int32_t info_off)
 {
-    (void)exec_env; (void)info;
-    wali_stub_log(SYS_SYSINFO);
-    return -L_ENOSYS;
+    uint8_t *info = wali_get_mem(exec_env, info_off, 64);
+    if (!info)
+        return -L_EFAULT;
+    memset(info, 0, 64);
+    int64_t *uptime = (int64_t *)info;
+    *uptime = pit_ticks / 100;
+    return 0;
 }
 
 static int64_t wali_sys_sched_setscheduler(wasm_exec_env_t exec_env,

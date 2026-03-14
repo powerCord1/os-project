@@ -17,6 +17,9 @@ void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
                            void *ctx);
 uint64_t irq_dispatch(uint64_t rsp, uint8_t irq);
 void register_exceptions();
+void idt_install_lapic_vectors(void);
+uint64_t lapic_timer_handler(uint64_t rsp);
+uint64_t lapic_ipi_sched_handler(uint64_t rsp);
 
 extern struct irq_handler_entry *irq_handlers[16];
 extern void (*exception_handlers[32])(interrupt_frame_t *);
