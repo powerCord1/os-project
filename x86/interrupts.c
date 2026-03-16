@@ -12,10 +12,14 @@
 #include <io.h>
 #include <isr.h>
 #include <keyboard.h>
+#include <lapic.h>
 #include <panic.h>
 #include <pic.h>
 #include <pit.h>
 #include <prediction.h>
+#include <process.h>
+#include <scheduler.h>
+#include <smp.h>
 #include <stdio.h>
 #include <string.h>
 #include <tty.h>
@@ -313,6 +317,38 @@ void register_exceptions()
     exception_install_handler(13, gpf_handler);
     exception_install_handler(12, seg_fault_handler);
     exception_install_handler(6, invalid_opcode_handler);
+}
+
+void idt_install_lapic_vectors(void)
+{
+    idt_set_descriptor(LAPIC_TIMER_VECTOR, &isr_lapic_timer, 0x8E);
+    idt_set_descriptor(LAPIC_IPI_SCHED_VEC, &isr_lapic_ipi_sched, 0x8E);
+    idt_set_descriptor(LAPIC_SPURIOUS_VEC, &isr_lapic_spurious, 0x8E);
+
+    void *lapic_irq_stubs[16] = {
+        &isr_lapic_irq0,  &isr_lapic_irq1,  &isr_lapic_irq2,
+        &isr_lapic_irq3,  &isr_lapic_irq4,  &isr_lapic_irq5,
+        &isr_lapic_irq6,  &isr_lapic_irq7,  &isr_lapic_irq8,
+        &isr_lapic_irq9,  &isr_lapic_irq10, &isr_lapic_irq11,
+        &isr_lapic_irq12, &isr_lapic_irq13, &isr_lapic_irq14,
+        &isr_lapic_irq15,
+    };
+    // Skip IRQ 0 (vector 0x20) — LAPIC timer owns that vector
+    for (int i = 1; i < 16; i++)
+        idt_set_descriptor(0x20 + i, lapic_irq_stubs[i], 0x8E);
+}
+
+uint64_t lapic_timer_handler(uint64_t rsp)
+{
+    if (smp_get_current_cpu()->cpu_id == 0)
+        system_ticks++;
+    wali_check_timers();
+    return scheduler_schedule(rsp);
+}
+
+uint64_t lapic_ipi_sched_handler(uint64_t rsp)
+{
+    return scheduler_schedule(rsp);
 }
 
 void idt_load()

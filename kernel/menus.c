@@ -16,7 +16,7 @@ static void wasm_init(void)
     fb_set_cursor(0, 0);
     tty_sync_from_fb(tty_get(0));
     char *argv[] = {"init"};
-    wasm_run_file("/INIT.WM", 1, argv);
+    wasm_run_file("/init.wm", 1, argv);
 }
 
 void main_menu()

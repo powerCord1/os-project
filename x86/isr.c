@@ -4,10 +4,9 @@
 #include <debug.h>
 #include <interrupts.h>
 #include <isr.h>
-#include <keyboard.h>
+#include <lapic.h>
 #include <panic.h>
 #include <pic.h>
-#include <pit.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -121,9 +120,6 @@ EXCEPTION_HANDLER(res31, 31)
         IRETQ()                                                                \
     }
 
-IRQ_HANDLER(isr_pit, pit_handler, 0)
-IRQ_HANDLER(isr_keyboard, keyboard_handler, 1)
-
 #define IRQ_HANDLER_GENERIC(n, irq_num)                                        \
     __attribute__((naked)) void n()                                            \
     {                                                                          \
@@ -174,7 +170,11 @@ void double_fault_handler(interrupt_frame_t *frame)
 
 void gpf_handler(interrupt_frame_t *frame)
 {
-    panic("General protection fault");
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "GPF\nRIP: 0x%016lx\nError: 0x%lx\nRSP: 0x%016lx\n",
+             frame->rip, frame->error_code, frame->rsp);
+    panic(buf);
 }
 
 void seg_fault_handler(interrupt_frame_t *frame)
@@ -185,4 +185,58 @@ void seg_fault_handler(interrupt_frame_t *frame)
 void invalid_opcode_handler(interrupt_frame_t *frame)
 {
     panic("Invalid opcode");
+}
+
+// LAPIC timer handler (vector 0x20) - replaces PIT for scheduling
+#define LAPIC_IRQ_HANDLER(n, handler)                                          \
+    __attribute__((naked)) void n()                                            \
+    {                                                                          \
+        PUSH_REGS()                                                            \
+        __asm__ volatile("mov %rsp, %rdi\n"                                    \
+                         "call " #handler "\n"                                 \
+                         "mov %rax, %rsp\n"                                    \
+                         "call lapic_eoi\n");                                  \
+        POP_REGS()                                                             \
+        IRETQ()                                                                \
+    }
+
+LAPIC_IRQ_HANDLER(isr_lapic_timer, lapic_timer_handler)
+LAPIC_IRQ_HANDLER(isr_lapic_ipi_sched, lapic_ipi_sched_handler)
+
+#define LAPIC_IRQ_HANDLER_GENERIC(n, irq_num)                                  \
+    __attribute__((naked)) void n()                                            \
+    {                                                                          \
+        PUSH_REGS()                                                            \
+        __asm__ volatile("mov %rsp, %rdi\n"                                    \
+                         "mov $" #irq_num ", %rsi\n"                           \
+                         "call irq_dispatch\n"                                 \
+                         "mov %rax, %rsp\n"                                    \
+                         "call lapic_eoi\n");                                  \
+        POP_REGS()                                                             \
+        IRETQ()                                                                \
+    }
+
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq0, 0)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq1, 1)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq2, 2)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq3, 3)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq4, 4)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq5, 5)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq6, 6)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq7, 7)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq8, 8)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq9, 9)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq10, 10)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq11, 11)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq12, 12)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq13, 13)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq14, 14)
+LAPIC_IRQ_HANDLER_GENERIC(isr_lapic_irq15, 15)
+
+// Spurious interrupt handler - no EOI
+__attribute__((naked)) void isr_lapic_spurious()
+{
+    PUSH_REGS()
+    POP_REGS()
+    IRETQ()
 }

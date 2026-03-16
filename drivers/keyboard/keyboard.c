@@ -7,6 +7,7 @@
 #include <interrupts.h>
 #include <io.h>
 #include <keyboard.h>
+#include <devfs.h>
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
@@ -33,6 +34,12 @@ void kbd_init()
     log_verbose("Setting typematic rate, rate: %d, delay: %d",
                 KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
     kbd_set_typematic_rate(KBD_DEFAULT_TYPM_RATE, KBD_DEFAULT_TYPM_DELAY);
+    // Drain stale ACK bytes left by LED/typematic commands above.
+    // The 8042 output buffer holds unread data, keeping IRQ 1 HIGH.
+    // Edge-triggered IOAPIC won't fire until the line goes LOW first.
+    while (inb(KBD_STATUS_PORT) & 1)
+        inb(KBD_DATA_PORT);
+
     log_verbose("Installing keyboard handler");
     irq_install_handler(IRQ_TYPE_KEYBOARD,
                         (uint64_t (*)(uint64_t, void *))keyboard_handler, NULL);
@@ -124,6 +131,7 @@ uint64_t keyboard_handler(uint64_t rsp)
             kbd_modifiers.alt = false;
             break;
         }
+        input_dev_push_event(key, false);
     } else {
         // key press
         switch (key) {
@@ -142,6 +150,8 @@ uint64_t keyboard_handler(uint64_t rsp)
             kbd_modifiers.alt = true;
             break;
         }
+
+        input_dev_push_event(key, true);
 
         last_char = scancode_map[key];
         last_scancode = key;
