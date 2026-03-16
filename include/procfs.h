@@ -1,5 +1,4 @@
 #pragma once
 
-#include <wasm_api.h>
-
-int procfs_open(wasm_process_t *proc, const char *path);
+struct fs_driver;
+extern struct fs_driver procfs_driver;

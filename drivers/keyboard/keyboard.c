@@ -7,6 +7,7 @@
 #include <interrupts.h>
 #include <io.h>
 #include <keyboard.h>
+#include <devfs.h>
 #include <panic.h>
 #include <pit.h>
 #include <power.h>
@@ -130,6 +131,7 @@ uint64_t keyboard_handler(uint64_t rsp)
             kbd_modifiers.alt = false;
             break;
         }
+        input_dev_push_event(key, false);
     } else {
         // key press
         switch (key) {
@@ -148,6 +150,8 @@ uint64_t keyboard_handler(uint64_t rsp)
             kbd_modifiers.alt = true;
             break;
         }
+
+        input_dev_push_event(key, true);
 
         last_char = scancode_map[key];
         last_scancode = key;

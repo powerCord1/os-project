@@ -4,7 +4,7 @@
 uint64
 os_time_get_boot_us(void)
 {
-    return (uint64)pit_ticks * 1000;
+    return (uint64)system_ticks * 1000;
 }
 
 uint64

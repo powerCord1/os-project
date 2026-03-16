@@ -10,7 +10,7 @@
 #include <scheduler.h>
 #include <tty.h>
 #include <waitqueue.h>
-#include <procfs.h>
+#include <devfs.h>
 #include <wasm_api.h>
 #include <wasm_runner.h>
 #include <wali_defs.h>
@@ -306,6 +306,15 @@ static int64_t wali_do_write(wasm_process_t *proc, int32_t fd,
     }
     case FD_PIPE_WRITE:
         return (int64_t)pipe_write(f->pipe.pipe_id, buf, count);
+    case FD_DEVICE: {
+        const devfs_device_t *dev = devfs_get(f->device.dev_id);
+        if (!dev || !dev->write)
+            return -L_EBADF;
+        int64_t r = dev->write(f->device.dev_state, buf, count, f->device.pos);
+        if (r > 0)
+            f->device.pos += r;
+        return r;
+    }
     default:
         return -L_EBADF;
     }
@@ -364,6 +373,16 @@ static int64_t wali_do_read(wasm_process_t *proc, int32_t fd,
     }
     case FD_PIPE_READ:
         return (int64_t)pipe_read(f->pipe.pipe_id, buf, count);
+    case FD_DEVICE: {
+        const devfs_device_t *dev = devfs_get(f->device.dev_id);
+        if (!dev || !dev->read)
+            return -L_EBADF;
+        bool nonblock = (f->device.flags & L_O_NONBLOCK) != 0;
+        int64_t r = dev->read(f->device.dev_state, buf, count, f->device.pos, nonblock);
+        if (r > 0)
+            f->device.pos += r;
+        return r;
+    }
     default:
         return -L_EBADF;
     }
@@ -707,30 +726,36 @@ static int64_t wali_do_open(wasm_process_t *proc, const char *pathname, int32_t 
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    if (strncmp(pathbuf, "/proc/", 6) == 0)
-        return procfs_open(proc, pathbuf);
+    if (strncmp(pathbuf, "/dev/", 5) == 0) {
+        const char *dev_name = pathbuf + 5;
+        int dev_id = devfs_lookup(dev_name);
+        if (dev_id < 0)
+            return -L_ENOENT;
+        const devfs_device_t *dev = devfs_get(dev_id);
+        int fd = wali_fd_alloc(proc);
+        if (fd < 0)
+            return -L_EMFILE;
+        void *state = NULL;
+        int err = dev->open(&state);
+        if (err < 0) {
+            proc->fds[fd].type = FD_NONE;
+            return err;
+        }
+        proc->fds[fd].type = FD_DEVICE;
+        proc->fds[fd].device.dev_id = dev_id;
+        proc->fds[fd].device.dev_state = state;
+        proc->fds[fd].device.flags = flags;
+        proc->fds[fd].device.pos = 0;
+        return fd;
+    }
 
     int fd = wali_fd_alloc(proc);
     if (fd < 0)
         return -L_EMFILE;
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-
     if (flags & L_O_DIRECTORY) {
-        if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-            if (filename) free(filename);
-            return -L_ENOENT;
-        }
-        int count = 0;
-        char **entries = vfs_list_directory(parent_cluster, &count);
-        if (!entries) {
-            free(filename);
+        if (!vfs_is_dir(pathbuf))
             return -L_ENOTDIR;
-        }
-        for (int i = 0; i < count; i++)
-            free(entries[i]);
-        free(entries);
 
         wasm_fd_t *f = &proc->fds[fd];
         f->type = FD_FILE;
@@ -740,26 +765,18 @@ static int64_t wali_do_open(wasm_process_t *proc, const char *pathname, int32_t 
         f->file.writable = false;
         f->file.dirty = false;
         f->file.flags = flags;
-        f->file.parent_cluster = parent_cluster;
-        strncpy(f->file.filename, filename, 11);
-        f->file.filename[11] = '\0';
-        free(filename);
+        strncpy(f->file.path, pathbuf, 255);
+        f->file.path[255] = '\0';
         return fd;
     }
 
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -L_ENOENT;
-    }
-
     uint32_t size = 0;
-    uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
+    uint8_t *data = vfs_read(pathbuf, &size);
 
     if (!data && (flags & L_O_CREAT)) {
         data = malloc(1);
         size = 0;
     } else if (!data) {
-        free(filename);
         return -L_ENOENT;
     }
 
@@ -771,10 +788,8 @@ static int64_t wali_do_open(wasm_process_t *proc, const char *pathname, int32_t 
     f->file.writable = (flags & (L_O_WRONLY | L_O_RDWR)) != 0;
     f->file.dirty = false;
     f->file.flags = flags;
-    f->file.parent_cluster = parent_cluster;
-    strncpy(f->file.filename, filename, 11);
-    f->file.filename[11] = '\0';
-    free(filename);
+    strncpy(f->file.path, pathbuf, 255);
+    f->file.path[255] = '\0';
 
     if (flags & L_O_TRUNC) {
         f->file.size = 0;
@@ -824,8 +839,7 @@ static int64_t wali_sys_close(wasm_exec_env_t exec_env, int32_t fd)
         break;
     case FD_FILE:
         if (f->file.dirty && f->file.data)
-            vfs_write_file(f->file.parent_cluster, f->file.filename,
-                           f->file.data, f->file.size);
+            vfs_write(f->file.path, f->file.data, f->file.size);
         if (f->file.data)
             free(f->file.data);
         break;
@@ -835,6 +849,12 @@ static int64_t wali_sys_close(wasm_exec_env_t exec_env, int32_t fd)
     case FD_PIPE_WRITE:
         pipe_unref_write(f->pipe.pipe_id);
         break;
+    case FD_DEVICE: {
+        const devfs_device_t *dev = devfs_get(f->device.dev_id);
+        if (dev && dev->close)
+            dev->close(f->device.dev_state);
+        break;
+    }
     default:
         break;
     }
@@ -852,6 +872,20 @@ static int64_t wali_sys_lseek(wasm_exec_env_t exec_env, int32_t fd,
     wasm_fd_t *f = &proc->fds[fd];
     if (f->type == FD_CONSOLE)
         return -L_ESPIPE;
+
+    if (f->type == FD_DEVICE) {
+        int64_t new_pos;
+        switch (whence) {
+        case 0: new_pos = offset; break;
+        case 1: new_pos = (int64_t)f->device.pos + offset; break;
+        default: return -L_EINVAL;
+        }
+        if (new_pos < 0)
+            return -L_EINVAL;
+        f->device.pos = (uint64_t)new_pos;
+        return new_pos;
+    }
+
     if (f->type != FD_FILE)
         return -L_EBADF;
 
@@ -887,37 +921,30 @@ static int64_t wali_do_stat_path(wasm_process_t *proc, const char *pathname,
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    if (strncmp(pathbuf, "/proc/", 6) == 0) {
-        wali_fill_stat(st, 0, L_S_IFREG | 0444);
-        return 0;
-    }
-
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
+    if (strncmp(pathbuf, "/dev/", 5) == 0) {
+        const char *dev_name = pathbuf + 5;
+        if (devfs_lookup(dev_name) >= 0) {
+            wali_fill_stat(st, 0, L_S_IFCHR | 0666);
+            return 0;
+        }
         return -L_ENOENT;
     }
 
-    int count = 0;
-    char **entries = vfs_list_directory(parent_cluster, &count);
-    if (entries) {
-        for (int i = 0; i < count; i++)
-            free(entries[i]);
-        free(entries);
+    vfs_node_type_t type = vfs_type(pathbuf);
+    if (type == VFS_DIRECTORY) {
         wali_fill_stat(st, 0, L_S_IFDIR | 0755);
-        free(filename);
         return 0;
     }
-
-    uint32_t size = 0;
-    uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
-    free(filename);
-    if (!data)
-        return -L_ENOENT;
-    free(data);
-    wali_fill_stat(st, size, L_S_IFREG | 0644);
-    return 0;
+    if (type == VFS_FILE) {
+        uint32_t size = 0;
+        uint8_t *data = vfs_read(pathbuf, &size);
+        if (!data)
+            return -L_ENOENT;
+        free(data);
+        wali_fill_stat(st, size, L_S_IFREG | 0644);
+        return 0;
+    }
+    return -L_ENOENT;
 }
 
 static int64_t wali_sys_stat(wasm_exec_env_t exec_env, int32_t pathname_off,
@@ -964,6 +991,9 @@ static int64_t wali_sys_fstat(wasm_exec_env_t exec_env, int32_t fd, int32_t stat
     case FD_PIPE_READ:
     case FD_PIPE_WRITE:
         wali_fill_stat(st, 0, L_S_IFIFO | 0600);
+        return 0;
+    case FD_DEVICE:
+        wali_fill_stat(st, 0, L_S_IFCHR | 0666);
         return 0;
     default:
         return -L_EBADF;
@@ -1012,17 +1042,7 @@ static int64_t wali_sys_access(wasm_exec_env_t exec_env, int32_t pathname_off,
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    if (strncmp(pathbuf, "/proc/", 6) == 0)
-        return 0;
-
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -L_ENOENT;
-    }
-    free(filename);
-    return 0;
+    return vfs_exists(pathbuf) ? 0 : -L_ENOENT;
 }
 
 static int64_t wali_sys_faccessat(wasm_exec_env_t exec_env, int32_t dirfd,
@@ -1040,17 +1060,7 @@ static int64_t wali_sys_faccessat(wasm_exec_env_t exec_env, int32_t dirfd,
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    if (strncmp(pathbuf, "/proc/", 6) == 0)
-        return 0;
-
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -L_ENOENT;
-    }
-    free(filename);
-    return 0;
+    return vfs_exists(pathbuf) ? 0 : -L_ENOENT;
 }
 
 static int64_t wali_sys_getcwd(wasm_exec_env_t exec_env, int32_t buf_off, uint32_t size)
@@ -1078,13 +1088,8 @@ static int64_t wali_sys_chdir(wasm_exec_env_t exec_env, int32_t path_off)
     if (!wali_resolve_path(proc, path, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
+    if (!vfs_exists(pathbuf))
         return -L_ENOENT;
-    }
-    free(filename);
 
     strncpy(proc->cwd, pathbuf, sizeof(proc->cwd) - 1);
     proc->cwd[sizeof(proc->cwd) - 1] = '\0';
@@ -1125,10 +1130,14 @@ static int64_t wali_sys_fcntl(wasm_exec_env_t exec_env, int32_t fd,
     case L_F_GETFL:
         if (proc->fds[fd].type == FD_FILE)
             return (int64_t)proc->fds[fd].file.flags;
+        if (proc->fds[fd].type == FD_DEVICE)
+            return (int64_t)proc->fds[fd].device.flags;
         return 0;
     case L_F_SETFL:
         if (proc->fds[fd].type == FD_FILE)
             proc->fds[fd].file.flags = (uint32_t)arg;
+        else if (proc->fds[fd].type == FD_DEVICE)
+            proc->fds[fd].device.flags = (uint32_t)arg;
         return 0;
     default:
         return -L_EINVAL;
@@ -1173,8 +1182,7 @@ static int64_t wali_do_dup2(wasm_process_t *proc, int32_t oldfd, int32_t newfd)
         switch (f->type) {
         case FD_FILE:
             if (f->file.dirty && f->file.data)
-                vfs_write_file(f->file.parent_cluster, f->file.filename,
-                               f->file.data, f->file.size);
+                vfs_write(f->file.path, f->file.data, f->file.size);
             if (f->file.data)
                 free(f->file.data);
             break;
@@ -1275,7 +1283,7 @@ static int64_t wali_sys_getdents64(wasm_exec_env_t exec_env, int32_t fd,
         return 0;
 
     int nentries = 0;
-    char **entries = vfs_list_directory(f->file.parent_cluster, &nentries);
+    char **entries = vfs_list(f->file.path, &nentries);
     if (!entries)
         return -L_ENOTDIR;
 
@@ -1322,14 +1330,7 @@ static int64_t wali_sys_unlink(wasm_exec_env_t exec_env, int32_t pathname_off)
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -L_ENOENT;
-    }
-    bool ok = vfs_delete_file(parent_cluster, filename);
-    free(filename);
+    bool ok = vfs_delete(pathbuf);
     return ok ? 0 : -L_ENOENT;
 }
 
@@ -1347,19 +1348,11 @@ static int64_t wali_sys_unlinkat(wasm_exec_env_t exec_env, int32_t dirfd,
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -L_ENOENT;
-    }
-
     bool ok;
     if (flags & L_AT_REMOVEDIR)
-        ok = vfs_delete_directory(parent_cluster, filename);
+        ok = vfs_rmdir(pathbuf);
     else
-        ok = vfs_delete_file(parent_cluster, filename);
-    free(filename);
+        ok = vfs_delete(pathbuf);
     return ok ? 0 : -L_ENOENT;
 }
 
@@ -1393,14 +1386,7 @@ static int64_t wali_sys_mkdir(wasm_exec_env_t exec_env, int32_t pathname_off, in
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
 
-    uint32_t parent_cluster;
-    char *dirname = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
-        if (dirname) free(dirname);
-        return -L_ENOENT;
-    }
-    bool ok = vfs_create_directory(parent_cluster, dirname);
-    free(dirname);
+    bool ok = vfs_mkdir(pathbuf);
     return ok ? 0 : -L_EEXIST;
 }
 
@@ -1418,14 +1404,7 @@ static int64_t wali_sys_mkdirat(wasm_exec_env_t exec_env, int32_t dirfd,
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
-    uint32_t parent_cluster;
-    char *dirname = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
-        if (dirname) free(dirname);
-        return -L_ENOENT;
-    }
-    bool ok = vfs_create_directory(parent_cluster, dirname);
-    free(dirname);
+    bool ok = vfs_mkdir(pathbuf);
     return ok ? 0 : -L_EEXIST;
 }
 
@@ -1439,14 +1418,7 @@ static int64_t wali_sys_rmdir(wasm_exec_env_t exec_env, int32_t pathname_off)
     char pathbuf[256];
     if (!wali_resolve_path(proc, pathname, pathbuf, sizeof(pathbuf)))
         return -L_ENAMETOOLONG;
-    uint32_t parent_cluster;
-    char *dirname = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
-        if (dirname) free(dirname);
-        return -L_ENOENT;
-    }
-    bool ok = vfs_delete_directory(parent_cluster, dirname);
-    free(dirname);
+    bool ok = vfs_rmdir(pathbuf);
     return ok ? 0 : -L_ENOTEMPTY;
 }
 
@@ -1482,8 +1454,7 @@ static int64_t wali_sys_fsync(wasm_exec_env_t exec_env, int32_t fd)
         return -L_EBADF;
     wasm_fd_t *f = &proc->fds[fd];
     if (f->type == FD_FILE && f->file.dirty && f->file.data) {
-        vfs_write_file(f->file.parent_cluster, f->file.filename,
-                       f->file.data, f->file.size);
+        vfs_write(f->file.path, f->file.data, f->file.size);
         f->file.dirty = false;
     }
     return 0;
@@ -1550,6 +1521,18 @@ static int64_t wali_sys_ioctl(wasm_exec_env_t exec_env, int32_t fd,
     wasm_process_t *proc = WALI_PROC(exec_env);
     if (fd < 0 || fd >= WASM_MAX_FDS)
         return -L_EBADF;
+
+    if (proc->fds[fd].type == FD_DEVICE) {
+        const devfs_device_t *dev = devfs_get(proc->fds[fd].device.dev_id);
+        if (!dev || !dev->ioctl)
+            return -L_ENOTTY;
+        uint32_t argp_size = (request >> 16) & 0x3fff;
+        if (argp_size == 0) argp_size = 256;
+        void *argp = wali_get_mem(exec_env, argp_off, argp_size);
+        if (!argp)
+            return -L_EFAULT;
+        return dev->ioctl(proc->fds[fd].device.dev_state, request, argp, argp_size);
+    }
 
     if (proc->fds[fd].type != FD_CONSOLE)
         return -L_ENOTTY;
@@ -1635,6 +1618,10 @@ static bool fd_check_readable(wasm_process_t *proc, int fd)
         pipe_t *p = pipe_get(f->pipe.pipe_id);
         return p && (p->head != p->tail || p->write_refs == 0);
     }
+    case FD_DEVICE: {
+        const devfs_device_t *dev = devfs_get(f->device.dev_id);
+        return dev && dev->poll_readable && dev->poll_readable(f->device.dev_state);
+    }
     default:
         return false;
     }
@@ -1643,6 +1630,10 @@ static bool fd_check_readable(wasm_process_t *proc, int fd)
 static bool fd_check_writable(wasm_process_t *proc, int fd)
 {
     wasm_fd_t *f = &proc->fds[fd];
+    if (f->type == FD_DEVICE) {
+        const devfs_device_t *dev = devfs_get(f->device.dev_id);
+        return dev && dev->poll_writable && dev->poll_writable(f->device.dev_state);
+    }
     return f->type == FD_CONSOLE || f->type == FD_PIPE_WRITE ||
            (f->type == FD_FILE && f->file.writable);
 }
@@ -1658,7 +1649,7 @@ static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
 
     uint64_t deadline = 0;
     if (timeout > 0)
-        deadline = pit_ticks + (uint64_t)timeout;
+        deadline = system_ticks + (uint64_t)timeout;
 
     int ready;
     do {
@@ -1718,7 +1709,7 @@ static int64_t wali_sys_poll(wasm_exec_env_t exec_env, int32_t fds_off,
                 waitqueue_end_sleep(&tty->input_wq);
             }
         } else {
-            if (pit_ticks >= deadline)
+            if (system_ticks >= deadline)
                 break;
             scheduler_yield();
         }
@@ -1747,7 +1738,7 @@ static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
 
     uint64_t deadline = 0;
     if (timeout_ms > 0)
-        deadline = pit_ticks + (uint64_t)timeout_ms;
+        deadline = system_ticks + (uint64_t)timeout_ms;
 
     int ready;
     do {
@@ -1806,7 +1797,7 @@ static int64_t wali_sys_ppoll(wasm_exec_env_t exec_env, int32_t fds_off,
                 waitqueue_end_sleep(&tty->input_wq);
             }
         } else {
-            if (pit_ticks >= deadline)
+            if (system_ticks >= deadline)
                 break;
             scheduler_yield();
         }
@@ -1823,7 +1814,7 @@ static int64_t wali_sys_clock_gettime(wasm_exec_env_t exec_env, int32_t clockid,
     if (!tp)
         return -L_EFAULT;
 
-    uint64_t ticks = pit_ticks;
+    uint64_t ticks = system_ticks;
     tp->tv_sec = ticks / 1000;
     tp->tv_nsec = (ticks % 1000) * 1000000;
     return 0;
@@ -1853,8 +1844,8 @@ static int64_t wali_sys_clock_nanosleep(wasm_exec_env_t exec_env, int32_t clocki
         return -L_EFAULT;
 
     uint64_t ms = req->tv_sec * 1000 + req->tv_nsec / 1000000;
-    uint64_t target = pit_ticks + ms;
-    while (pit_ticks < target)
+    uint64_t target = system_ticks + ms;
+    while (system_ticks < target)
         scheduler_yield();
     return 0;
 }
@@ -1868,8 +1859,8 @@ static int64_t wali_sys_nanosleep(wasm_exec_env_t exec_env, int32_t req_off,
         return -L_EFAULT;
 
     uint64_t ms = req->tv_sec * 1000 + req->tv_nsec / 1000000;
-    uint64_t target = pit_ticks + ms;
-    while (pit_ticks < target)
+    uint64_t target = system_ticks + ms;
+    while (system_ticks < target)
         scheduler_yield();
     return 0;
 }
@@ -1881,7 +1872,7 @@ static int64_t wali_sys_gettimeofday(wasm_exec_env_t exec_env, int32_t tv_off,
     if (tv_off) {
         linux_timeval_t *tv = wali_get_mem(exec_env, tv_off, sizeof(linux_timeval_t));
         if (tv) {
-            uint64_t ticks = pit_ticks;
+            uint64_t ticks = system_ticks;
             tv->tv_sec = ticks / 1000;
             tv->tv_usec = (ticks % 1000) * 1000;
         }
@@ -1914,7 +1905,7 @@ static int64_t wali_sys_getrandom(wasm_exec_env_t exec_env, int32_t buf_off,
     if (!buf)
         return -L_EFAULT;
 
-    uint64_t seed = pit_ticks;
+    uint64_t seed = system_ticks;
     for (uint32_t i = 0; i < buflen; i++) {
         seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
         buf[i] = (uint8_t)(seed >> 33);
@@ -2082,7 +2073,7 @@ static int64_t wali_sys_pselect6(wasm_exec_env_t exec_env, int32_t nfds,
 
     uint64_t deadline = 0;
     if (timeout_ms > 0)
-        deadline = pit_ticks + (uint64_t)timeout_ms;
+        deadline = system_ticks + (uint64_t)timeout_ms;
 
     int ready;
     do {
@@ -2142,7 +2133,7 @@ static int64_t wali_sys_pselect6(wasm_exec_env_t exec_env, int32_t nfds,
                 waitqueue_end_sleep(&tty->input_wq);
             }
         } else {
-            if (pit_ticks >= deadline)
+            if (system_ticks >= deadline)
                 break;
             scheduler_yield();
         }
@@ -2258,16 +2249,8 @@ static int64_t wali_sys_execve(wasm_exec_env_t exec_env, int32_t pathname_off,
         pathbuf[sizeof(pathbuf) - 1] = '\0';
     }
 
-    /* 3. Read the WASM binary from filesystem */
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -L_ENOENT;
-    }
     uint32_t size = 0;
-    uint8_t *wasm_bytes = vfs_read_file(parent_cluster, filename, &size);
-    free(filename);
+    uint8_t *wasm_bytes = vfs_read(pathbuf, &size);
     if (!wasm_bytes) return -L_ENOENT;
 
     /* 4. Parse argv from WASM memory (before we trash the instance) */
@@ -2413,7 +2396,7 @@ void wali_check_timers(void)
         wasm_process_t *proc = e->wasm_proc;
         if (proc->itimer_next_tick == 0)
             continue;
-        if (pit_ticks >= proc->itimer_next_tick) {
+        if (system_ticks >= proc->itimer_next_tick) {
             e->sig_pending |= (1ULL << (L_SIGALRM - 1));
             tty_t *tty = tty_get(proc->tty_id);
             if (tty)
@@ -2460,7 +2443,7 @@ static int64_t wali_sys_select(wasm_exec_env_t exec_env, int32_t nfds,
 
     uint64_t deadline = 0;
     if (timeout_ms > 0)
-        deadline = pit_ticks + (uint64_t)timeout_ms;
+        deadline = system_ticks + (uint64_t)timeout_ms;
 
     int ready;
     do {
@@ -2520,7 +2503,7 @@ static int64_t wali_sys_select(wasm_exec_env_t exec_env, int32_t nfds,
                 waitqueue_end_sleep(&tty->input_wq);
             }
         } else {
-            if (pit_ticks >= deadline)
+            if (system_ticks >= deadline)
                 break;
             scheduler_yield();
         }
@@ -2543,8 +2526,8 @@ static int64_t wali_sys_setitimer(wasm_exec_env_t exec_env, int32_t which,
         if (!ov) return -L_EFAULT;
         ov->it_interval.tv_sec = proc->itimer_interval_us / 1000000;
         ov->it_interval.tv_usec = proc->itimer_interval_us % 1000000;
-        if (proc->itimer_next_tick > pit_ticks) {
-            int64_t remain_ms = (int64_t)(proc->itimer_next_tick - pit_ticks);
+        if (proc->itimer_next_tick > system_ticks) {
+            int64_t remain_ms = (int64_t)(proc->itimer_next_tick - system_ticks);
             ov->it_value.tv_sec = remain_ms / 1000;
             ov->it_value.tv_usec = (remain_ms % 1000) * 1000;
         } else {
@@ -2564,7 +2547,7 @@ static int64_t wali_sys_setitimer(wasm_exec_env_t exec_env, int32_t which,
         if (proc->itimer_value_us > 0) {
             uint64_t ms = (uint64_t)(proc->itimer_value_us / 1000);
             if (ms == 0) ms = 1;
-            proc->itimer_next_tick = pit_ticks + ms;
+            proc->itimer_next_tick = system_ticks + ms;
         } else {
             proc->itimer_next_tick = 0;
         }
@@ -2579,8 +2562,7 @@ static int64_t wali_sys_sync(wasm_exec_env_t exec_env)
     for (int i = 0; i < WASM_MAX_FDS; i++) {
         wasm_fd_t *f = &proc->fds[i];
         if (f->type == FD_FILE && f->file.dirty && f->file.data) {
-            vfs_write_file(f->file.parent_cluster, f->file.filename,
-                           f->file.data, f->file.size);
+            vfs_write(f->file.path, f->file.data, f->file.size);
             f->file.dirty = false;
         }
     }
@@ -2857,7 +2839,7 @@ static int64_t wali_sys_sysinfo(wasm_exec_env_t exec_env, int32_t info_off)
         return -L_EFAULT;
     memset(info, 0, 64);
     int64_t *uptime = (int64_t *)info;
-    *uptime = pit_ticks / 100;
+    *uptime = system_ticks / 100;
     return 0;
 }
 

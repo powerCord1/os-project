@@ -109,13 +109,14 @@ void ioapic_setup(void)
 {
     idt_install_lapic_vectors();
     pic_disable();
+    lapic_write(LAPIC_REG_LVT_LINT0, LAPIC_LVT_MASKED);
     ioapic_init();
     if (!ioapic_base)
         return;
 
     uint32_t bsp_lapic = lapic_id();
 
-    for (uint8_t i = 0; i < 16; i++) {
+    for (uint8_t i = 1; i < 16; i++) {
         uint32_t gsi = i;
         uint32_t redir_flags = 0;
 

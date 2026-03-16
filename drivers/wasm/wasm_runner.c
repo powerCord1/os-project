@@ -42,18 +42,10 @@ static void apply_fd_setup(wasm_process_t *proc, fd_setup_entry_t *setups, int c
             f->pipe.pipe_id = setups[i].pipe_id;
             break;
         case FD_SETUP_FILE_READ: {
-            uint32_t parent_cluster;
-            char *filename = NULL;
-            if (!vfs_resolve_path(setups[i].path, &parent_cluster, &filename)) {
-                if (filename) free(filename);
-                break;
-            }
             uint32_t size = 0;
-            uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
-            if (!data) {
-                free(filename);
+            uint8_t *data = vfs_read(setups[i].path, &size);
+            if (!data)
                 break;
-            }
             f->type = FD_FILE;
             f->file.data = data;
             f->file.size = size;
@@ -61,22 +53,12 @@ static void apply_fd_setup(wasm_process_t *proc, fd_setup_entry_t *setups, int c
             f->file.writable = false;
             f->file.dirty = false;
             f->file.flags = WASM_O_RDONLY;
-            f->file.parent_cluster = parent_cluster;
-            strncpy(f->file.filename, filename, 11);
-            f->file.filename[11] = '\0';
-            free(filename);
             break;
         }
         case FD_SETUP_FILE_WRITE:
         case FD_SETUP_FILE_APPEND: {
-            uint32_t parent_cluster;
-            char *filename = NULL;
-            if (!vfs_resolve_path(setups[i].path, &parent_cluster, &filename)) {
-                if (filename) free(filename);
-                break;
-            }
             uint32_t size = 0;
-            uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
+            uint8_t *data = vfs_read(setups[i].path, &size);
             if (!data) {
                 data = malloc(1);
                 size = 0;
@@ -89,10 +71,6 @@ static void apply_fd_setup(wasm_process_t *proc, fd_setup_entry_t *setups, int c
             f->file.writable = true;
             f->file.dirty = !append;
             f->file.flags = WASM_O_WRONLY | WASM_O_CREAT | (append ? WASM_O_APPEND : WASM_O_TRUNC);
-            f->file.parent_cluster = parent_cluster;
-            strncpy(f->file.filename, filename, 11);
-            f->file.filename[11] = '\0';
-            free(filename);
             break;
         }
         default:
@@ -122,30 +100,14 @@ void wasm_runtime_setup(void)
 static int wasm_run_module(const char *path, int argc, char **argv, int32_t pid,
                            fd_setup_entry_t *fd_setups, int fd_setup_count)
 {
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted.\n");
-        return -1;
-    }
-
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(path, &parent_cluster, &filename)) {
-        printf("Invalid path: %s\n", path);
-        if (filename)
-            free(filename);
-        return -1;
-    }
-
-    proc_entry_t *entry = proc_get(pid);
-
     uint32_t size = 0;
-    uint8_t *wasm_bytes = vfs_read_file(parent_cluster, filename, &size);
-    free(filename);
+    uint8_t *wasm_bytes = vfs_read(path, &size);
     if (!wasm_bytes) {
         printf("Failed to read '%s'\n", path);
         return -1;
     }
+
+    proc_entry_t *entry = proc_get(pid);
 
     wasm_process_t *proc = wasm_process_create(argc, argv);
     if (!proc) {

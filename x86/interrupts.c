@@ -19,6 +19,7 @@
 #include <prediction.h>
 #include <process.h>
 #include <scheduler.h>
+#include <smp.h>
 #include <stdio.h>
 #include <string.h>
 #include <tty.h>
@@ -339,6 +340,8 @@ void idt_install_lapic_vectors(void)
 
 uint64_t lapic_timer_handler(uint64_t rsp)
 {
+    if (smp_get_current_cpu()->cpu_id == 0)
+        system_ticks++;
     wali_check_timers();
     return scheduler_schedule(rsp);
 }

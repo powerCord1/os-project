@@ -224,7 +224,6 @@ char *strchr(const char *s, int c)
     if (c == '\0') {
         return (char *)s;
     }
-    log_verbose("strchr: character not found in string");
     return NULL;
 }
 

@@ -236,11 +236,6 @@ void cmd_mount(int argc, char **argv)
         return;
     }
 
-    if (vfs_get_mounted_fs()) {
-        printf("A filesystem is already mounted. Unmount first.\n");
-        return;
-    }
-
     int drive = atoi(argv[1]);
     int part_num = atoi(argv[2]);
 
@@ -261,7 +256,7 @@ void cmd_mount(int argc, char **argv)
     }
 
     partition_entry_t *p = &partitions[part_num];
-    if (vfs_mount(drive, p->lba_start, p->num_sectors)) {
+    if (vfs_mount_at("/", drive, p->lba_start, p->num_sectors)) {
         printf("Successfully mounted partition %d on drive %d.\n", part_num,
                drive);
     } else {
@@ -276,7 +271,7 @@ void cmd_umount(int argc, char **argv)
         return;
     }
 
-    if (vfs_unmount()) {
+    if (vfs_unmount("/")) {
         printf("Filesystem unmounted successfully.\n");
     } else {
         printf("No filesystem to unmount.\n");
@@ -290,65 +285,16 @@ void cmd_ls(int argc, char **argv)
         return;
     }
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted. Use 'mount' first.\n");
-        return;
-    }
+    const char *path = argc > 1 ? argv[1] : "/";
+    int count = 0;
+    char **entries = vfs_list(path, &count);
 
-    uint32_t target_cluster = mount->root_cluster;
-    if (argc == 2) {
-        char *path = argv[1];
-        uint32_t parent_cluster;
-        char *filename = NULL;
-
-        if (vfs_resolve_path(path, &parent_cluster, &filename)) {
-            // This is a bit tricky with the current VFS as we don't have a way
-            // to get the cluster of a file/dir easily from just
-            // vfs_resolve_path without FAT32 specific knowledge or extending
-            // the VFS. For now, let's keep it simple and assume path resolution
-            // for ls might need more work if it's not root.
-
-            // Re-implementing a simple path resolution for ls here
-            if (strcmp(path, "/") != 0 && strcmp(path, ".") != 0) {
-                // We need to find the cluster of the directory
-                // For now, we'll use a hacky way since we know it's FAT32
-                // In a real VFS, vfs_resolve_path would return a vfs_node_t
-
-                // Let's just use the root cluster if it's "/" or "."
-                // Otherwise we'd need to call driver specific find_file
-                // But wait, vfs_resolve_path already does find_file internally.
-
-                // If I want to fix this properly, I should return a vfs_node_t
-                // from resolution. But the user said "just adapt".
-
-                // Let's just handle root for now in 'ls' to keep it safe.
-                if (strcmp(path, "/") == 0) {
-                    target_cluster = mount->root_cluster;
-                } else {
-                    printf("ls: non-root path support temporarily limited in "
-                           "new VFS.\n");
-                    if (filename) {
-                        free(filename);
-                    }
-                    return;
-                }
-            }
+    if (entries) {
+        for (int i = 0; i < count; i++) {
+            printf("%s\n", entries[i]);
+            free(entries[i]);
         }
-        if (filename) {
-            free(filename);
-        }
-    }
-
-    int dir_count = 0;
-    char **dir_entries = vfs_list_directory(target_cluster, &dir_count);
-
-    if (dir_entries) {
-        for (int i = 0; i < dir_count; i++) {
-            printf("%s\n", dir_entries[i]);
-            free(dir_entries[i]);
-        }
-        free(dir_entries);
+        free(entries);
     }
 }
 
@@ -359,19 +305,14 @@ void cmd_cat(int argc, char **argv)
         return;
     }
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted. Use 'mount' first.\n");
-        return;
-    }
-
     uint32_t size = 0;
-    uint8_t *file_content = vfs_read_file(mount->root_cluster, argv[1], &size);
-    if (file_content) {
-        printf("%s\n", (char *)file_content);
-        free(file_content);
+    uint8_t *data = vfs_read(argv[1], &size);
+    if (data) {
+        for (uint32_t i = 0; i < size; i++)
+            putchar(data[i]);
+        free(data);
     } else {
-        printf("Failed to read file '%s'.\n", argv[1]);
+        printf("Failed to read '%s'\n", argv[1]);
     }
 }
 
@@ -382,33 +323,11 @@ void cmd_write(int argc, char **argv)
         return;
     }
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted. Use 'mount' first.\n");
-        return;
-    }
-
-    const char *path = argv[1];
-    const char *content = argv[2];
-    uint32_t content_size = strlen(content);
-    char *filename = NULL;
-    uint32_t parent_cluster;
-
-    if (!vfs_resolve_path(path, &parent_cluster, &filename)) {
-        printf("Error: Invalid path or filename.\n");
-        if (filename) {
-            free((void *)filename);
-        }
-        return;
-    }
-
-    if (vfs_write_file(parent_cluster, filename, (const uint8_t *)content,
-                       content_size)) {
-        printf("File '%s' written successfully.\n", filename);
+    if (vfs_write(argv[1], (const uint8_t *)argv[2], strlen(argv[2]))) {
+        printf("File '%s' written successfully.\n", argv[1]);
     } else {
-        printf("Failed to write file '%s'.\n", filename);
+        printf("Failed to write file '%s'.\n", argv[1]);
     }
-    free((void *)filename);
 }
 
 void cmd_rm(int argc, char **argv)
@@ -418,30 +337,11 @@ void cmd_rm(int argc, char **argv)
         return;
     }
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted. Use 'mount' first.\n");
-        return;
-    }
-
-    const char *path = argv[1];
-    char *filename = NULL;
-    uint32_t parent_cluster;
-
-    if (!vfs_resolve_path(path, &parent_cluster, &filename)) {
-        printf("Error: Invalid path or filename.\n");
-        if (filename) {
-            free((void *)filename);
-        }
-        return;
-    }
-
-    if (vfs_delete_file(parent_cluster, filename)) {
-        printf("File '%s' deleted successfully.\n", filename);
+    if (vfs_delete(argv[1])) {
+        printf("File '%s' deleted successfully.\n", argv[1]);
     } else {
-        printf("Failed to delete file '%s'.\n", filename);
+        printf("Failed to delete file '%s'.\n", argv[1]);
     }
-    free((void *)filename);
 }
 
 void cmd_mkdir(int argc, char **argv)
@@ -451,30 +351,11 @@ void cmd_mkdir(int argc, char **argv)
         return;
     }
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted. Use 'mount' first.\n");
-        return;
-    }
-
-    const char *path = argv[1];
-    char *new_dirname = NULL;
-    uint32_t parent_cluster;
-
-    if (!vfs_resolve_path(path, &parent_cluster, &new_dirname)) {
-        printf("Error: Invalid path or filename.\n");
-        if (new_dirname) {
-            free((void *)new_dirname);
-        }
-        return;
-    }
-
-    if (vfs_create_directory(parent_cluster, new_dirname)) {
-        printf("Directory '%s' created successfully.\n", new_dirname);
+    if (vfs_mkdir(argv[1])) {
+        printf("Directory '%s' created successfully.\n", argv[1]);
     } else {
-        printf("Failed to create directory '%s'.\n", new_dirname);
+        printf("Failed to create directory '%s'.\n", argv[1]);
     }
-    free((void *)new_dirname);
 }
 
 void cmd_rmdir(int argc, char **argv)
@@ -484,30 +365,11 @@ void cmd_rmdir(int argc, char **argv)
         return;
     }
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount) {
-        printf("No filesystem mounted. Use 'mount' first.\n");
-        return;
-    }
-
-    const char *path = argv[1];
-    char *dirname_to_del = NULL;
-    uint32_t parent_cluster;
-
-    if (!vfs_resolve_path(path, &parent_cluster, &dirname_to_del)) {
-        printf("Error: Invalid path or filename.\n");
-        if (dirname_to_del) {
-            free((void *)dirname_to_del);
-        }
-        return;
-    }
-
-    if (vfs_delete_directory(parent_cluster, dirname_to_del)) {
-        printf("Directory '%s' deleted successfully.\n", dirname_to_del);
+    if (vfs_rmdir(argv[1])) {
+        printf("Directory '%s' deleted successfully.\n", argv[1]);
     } else {
-        printf("Failed to delete directory '%s'.\n", dirname_to_del);
+        printf("Failed to delete directory '%s'.\n", argv[1]);
     }
-    free((void *)dirname_to_del);
 }
 
 void cmd_wasm(int argc, char **argv)
@@ -539,11 +401,36 @@ static void thread_test_func(void *arg)
     uint64_t delay = (id == 1) ? 1000 : 500;
     for (int i = 0; i < 5; i++) {
         printf("thread %d: %d\n", id, i);
-        uint64_t start = pit_ticks;
-        while (pit_ticks - start < delay)
+        uint64_t start = system_ticks;
+        while (system_ticks - start < delay)
             scheduler_yield();
     }
     printf("thread %d: done\n", id);
+}
+
+void cmd_ticktest(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    datetime_t dt;
+
+    printf("Waiting for RTC second to roll over...\n");
+    cmos_get_datetime(&dt);
+    uint8_t start_sec = dt.second;
+    while (dt.second == start_sec)
+        cmos_get_datetime(&dt);
+
+    uint64_t t0 = system_ticks;
+    start_sec = dt.second;
+    printf("Counting ticks for 5 RTC seconds...\n");
+
+    for (int i = 0; i < 5; i++) {
+        while (dt.second == start_sec)
+            cmos_get_datetime(&dt);
+        start_sec = dt.second;
+    }
+
+    uint64_t elapsed = system_ticks - t0;
+    printf("Ticks in 5 RTC seconds: %lu (%lu ticks/sec)\n", elapsed, elapsed / 5);
 }
 
 void cmd_threadtest(int argc, char **argv)

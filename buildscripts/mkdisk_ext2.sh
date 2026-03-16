@@ -41,6 +41,12 @@ for f in "$WASM_DIR"/*.wm; do
     [ -f "$f" ] && echo "write $f $(basename "$f")" >> "$DEBUGFS_CMDS"
 done
 
+# Copy data files (WAD files, etc.)
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+for f in "$SCRIPT_DIR"/userspace/doom/*.wad; do
+    [ -f "$f" ] && echo "write $f $(basename "$f")" >> "$DEBUGFS_CMDS"
+done
+
 debugfs -w -f "$DEBUGFS_CMDS" "$PART_IMG" 2>/dev/null
 
 # Write partition back into disk image

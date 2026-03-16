@@ -26,22 +26,28 @@ typedef enum {
     FD_CONSOLE,
     FD_FILE,
     FD_PIPE_READ,
-    FD_PIPE_WRITE
+    FD_PIPE_WRITE,
+    FD_DEVICE
 } fd_type_t;
 
 typedef struct {
     fd_type_t type;
     union {
         struct {
+            char path[256];
             uint8_t *data;
             uint32_t size, pos, flags;
             bool writable, dirty;
-            uint32_t parent_cluster;
-            char filename[12];
         } file;
         struct {
             int pipe_id;
         } pipe;
+        struct {
+            int dev_id;
+            void *dev_state;
+            uint32_t flags;
+            uint64_t pos;
+        } device;
     };
 } wasm_fd_t;
 

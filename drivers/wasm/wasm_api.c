@@ -10,7 +10,6 @@
 #include <framebuffer.h>
 #include <limine_defs.h>
 #include <pipe.h>
-#include <procfs.h>
 #include <tty.h>
 #include <waitqueue.h>
 #include <wasm_api.h>
@@ -141,8 +140,7 @@ void wasm_process_destroy(wasm_process_t *proc)
         switch (f->type) {
         case FD_FILE:
             if (f->file.dirty && f->file.data)
-                vfs_write_file(f->file.parent_cluster, f->file.filename,
-                               f->file.data, f->file.size);
+                vfs_write(f->file.path, f->file.data, f->file.size);
             if (f->file.data)
                 free(f->file.data);
             break;
@@ -199,7 +197,7 @@ static void wasm_api_putchar(wasm_exec_env_t exec_env, int32_t c)
 static int64_t wasm_api_get_ticks(wasm_exec_env_t exec_env)
 {
     (void)exec_env;
-    return (int64_t)pit_ticks;
+    return (int64_t)system_ticks;
 }
 
 static void wasm_api_exit(wasm_exec_env_t exec_env, int32_t code)
@@ -313,27 +311,18 @@ static int32_t wasm_api_open(wasm_exec_env_t exec_env, const char *path,
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
-    if (strncmp(pathbuf, "/proc/", 6) == 0)
-        return procfs_open(proc, pathbuf);
-
     int fd = wasm_fd_alloc(proc);
     if (fd < 0)
         return -1;
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename))
-        return -1;
-
     wasm_fd_t *f = &proc->fds[fd];
     uint32_t size = 0;
-    uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
+    uint8_t *data = vfs_read(pathbuf, &size);
 
     if (!data && (flags & WASM_O_CREAT)) {
         data = malloc(1);
         size = 0;
     } else if (!data) {
-        free(filename);
         return -1;
     }
 
@@ -344,10 +333,8 @@ static int32_t wasm_api_open(wasm_exec_env_t exec_env, const char *path,
     f->file.writable = (flags & (WASM_O_WRONLY | WASM_O_RDWR)) != 0;
     f->file.dirty = false;
     f->file.flags = flags;
-    f->file.parent_cluster = parent_cluster;
-    strncpy(f->file.filename, filename, 11);
-    f->file.filename[11] = '\0';
-    free(filename);
+    strncpy(f->file.path, pathbuf, sizeof(f->file.path) - 1);
+    f->file.path[sizeof(f->file.path) - 1] = '\0';
 
     if (flags & WASM_O_TRUNC) {
         f->file.size = 0;
@@ -370,8 +357,7 @@ static int32_t wasm_api_close(wasm_exec_env_t exec_env, int32_t fd)
         break;
     case FD_FILE:
         if (f->file.dirty && f->file.data)
-            vfs_write_file(f->file.parent_cluster, f->file.filename,
-                           f->file.data, f->file.size);
+            vfs_write(f->file.path, f->file.data, f->file.size);
         if (f->file.data)
             free(f->file.data);
         break;
@@ -516,26 +502,17 @@ static int32_t wasm_api_stat(wasm_exec_env_t exec_env, const char *path,
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename))
+    if (!vfs_exists(pathbuf))
         return -1;
 
-    int count = 0;
-    char **entries = vfs_list_directory(parent_cluster, &count);
-    if (entries) {
-        for (int i = 0; i < count; i++)
-            free(entries[i]);
-        free(entries);
+    if (vfs_is_dir(pathbuf)) {
         stat_buf[0] = 0;
         stat_buf[1] = VFS_DIRECTORY;
-        free(filename);
         return 0;
     }
 
     uint32_t size = 0;
-    uint8_t *data = vfs_read_file(parent_cluster, filename, &size);
-    free(filename);
+    uint8_t *data = vfs_read(pathbuf, &size);
     if (!data)
         return -1;
     free(data);
@@ -554,23 +531,8 @@ static int32_t wasm_api_readdir(wasm_exec_env_t exec_env, const char *path,
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
-    vfs_mount_t *mount = vfs_get_mounted_fs();
-    if (!mount)
-        return -1;
-
-    uint32_t cluster = mount->root_cluster;
-    if (strcmp(pathbuf, "/") != 0) {
-        uint32_t parent_cluster;
-        char *filename = NULL;
-        if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-            if (filename) free(filename);
-            return -1;
-        }
-        if (filename) free(filename);
-    }
-
     int count = 0;
-    char **entries = vfs_list_directory(cluster, &count);
+    char **entries = vfs_list(pathbuf, &count);
     if (!entries)
         return -1;
 
@@ -598,16 +560,7 @@ static int32_t wasm_api_mkdir(wasm_exec_env_t exec_env, const char *path, int32_
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
-    uint32_t parent_cluster;
-    char *dirname = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
-        if (dirname) free(dirname);
-        return -1;
-    }
-
-    int32_t result = vfs_create_directory(parent_cluster, dirname) ? 0 : -1;
-    free(dirname);
-    return result;
+    return vfs_mkdir(pathbuf) ? 0 : -1;
 }
 
 static int32_t wasm_api_unlink(wasm_exec_env_t exec_env, const char *path, int32_t path_len)
@@ -618,16 +571,7 @@ static int32_t wasm_api_unlink(wasm_exec_env_t exec_env, const char *path, int32
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
-    uint32_t parent_cluster;
-    char *filename = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &filename)) {
-        if (filename) free(filename);
-        return -1;
-    }
-
-    int32_t result = vfs_delete_file(parent_cluster, filename) ? 0 : -1;
-    free(filename);
-    return result;
+    return vfs_delete(pathbuf) ? 0 : -1;
 }
 
 static int32_t wasm_api_rmdir(wasm_exec_env_t exec_env, const char *path, int32_t path_len)
@@ -638,16 +582,7 @@ static int32_t wasm_api_rmdir(wasm_exec_env_t exec_env, const char *path, int32_
     memcpy(pathbuf, path, copy_len);
     pathbuf[copy_len] = '\0';
 
-    uint32_t parent_cluster;
-    char *dirname = NULL;
-    if (!vfs_resolve_path(pathbuf, &parent_cluster, &dirname)) {
-        if (dirname) free(dirname);
-        return -1;
-    }
-
-    int32_t result = vfs_delete_directory(parent_cluster, dirname) ? 0 : -1;
-    free(dirname);
-    return result;
+    return vfs_rmdir(pathbuf) ? 0 : -1;
 }
 
 static int32_t wasm_api_spawn(wasm_exec_env_t exec_env, const char *path,
@@ -794,8 +729,7 @@ static int32_t wasm_api_dup2(wasm_exec_env_t exec_env, int32_t oldfd, int32_t ne
         switch (f->type) {
         case FD_FILE:
             if (f->file.dirty && f->file.data)
-                vfs_write_file(f->file.parent_cluster, f->file.filename,
-                               f->file.data, f->file.size);
+                vfs_write(f->file.path, f->file.data, f->file.size);
             if (f->file.data)
                 free(f->file.data);
             break;

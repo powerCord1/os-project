@@ -104,8 +104,22 @@ WASM_CC = clang
 WASM_CFLAGS = --target=wasm32 -nostdlib -O2
 WASM_LDFLAGS = -Wl,--no-entry -Wl,--allow-undefined
 WASM_SRCDIR = userspace
-WASM_SOURCES = $(wildcard $(WASM_SRCDIR)/*.c)
+WALI_USERSPACE = fbtest.c
+WASM_SOURCES = $(filter-out $(addprefix $(WASM_SRCDIR)/,$(WALI_USERSPACE)),$(wildcard $(WASM_SRCDIR)/*.c))
 WASM_BINARIES = $(patsubst $(WASM_SRCDIR)/%.c,$(BUILDDIR)/wasm/%.wm,$(WASM_SOURCES))
+WALI_BINARIES = $(patsubst %.c,$(BUILDDIR)/wasm/%.wm,$(WALI_USERSPACE))
+
+# DOOM (doomgeneric via WALI toolchain)
+WALI_CC = wasm32-unknown-linux-muslwali-cc
+DOOM_SRCDIR = userspace/doom/doomgeneric
+DOOM_EXCLUDE = doomgeneric_sdl.c doomgeneric_win.c doomgeneric_xlib.c \
+               doomgeneric_soso.c doomgeneric_sosox.c doomgeneric_allegro.c \
+               doomgeneric_emscripten.c doomgeneric_linuxvt.c \
+               i_sdlmusic.c i_sdlsound.c i_allegromusic.c i_allegrosound.c \
+               mus2mid.c
+DOOM_ALL_SOURCES = $(wildcard $(DOOM_SRCDIR)/*.c)
+DOOM_SOURCES = $(filter-out $(addprefix $(DOOM_SRCDIR)/,$(DOOM_EXCLUDE)),$(DOOM_ALL_SOURCES))
+DOOM_WASM = $(BUILDDIR)/wasm/doom.wm
 
 # WAMR (WebAssembly Micro Runtime) configuration
 WAMR_DIR = ./wasm-micro-runtime
@@ -186,12 +200,29 @@ all: $(TARGET)
 
 wasm: $(WASM_BINARIES)
 
+doom: $(DOOM_WASM)
+
 $(BUILDDIR)/wasm/%.wm: $(WASM_SRCDIR)/%.c $(WASM_SRCDIR)/api.h
 	@echo "Compiling WASM $<..."
 	@mkdir -p $(dir $@)
 	$(WASM_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -Wl,--export=_start -o $@ $<
 
-disk: wasm
+$(DOOM_WASM): $(DOOM_SOURCES)
+	@echo "Compiling DOOM..."
+	@mkdir -p $(dir $@)
+	$(WALI_CC) -O2 -DNORMALUNIX -DLINUX \
+		-Wno-implicit-function-declaration -Wno-int-conversion \
+		-Wno-incompatible-pointer-types \
+		-I$(DOOM_SRCDIR) -lm -o $@ $(DOOM_SOURCES)
+
+$(BUILDDIR)/wasm/fbtest.wm: $(WASM_SRCDIR)/fbtest.c
+	@echo "Compiling WALI $<..."
+	@mkdir -p $(dir $@)
+	$(WALI_CC) -O2 -o $@ $<
+
+wali: $(WALI_BINARIES)
+
+disk: wasm wali
 	@echo "Creating ext2 disk image..."
 	@./buildscripts/mkdisk_ext2.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
 	@echo "Disk image created: $(DISK_IMG)"
