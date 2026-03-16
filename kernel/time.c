@@ -1,13 +1,16 @@
-#include <time.h>
-#include <cmos.h>
-#include <stdio.h>
 #include <stdbool.h>
+
+#include <cmos.h>
+#include <debug.h>
+#include <stdio.h>
+#include <time.h>
 
 static int timezone_offset = 0;
 
-void set_timezone(int offset_hours)
+void set_timezone(int offset)
 {
-    timezone_offset = offset_hours;
+    log_verbose("Setting timezone offet to %d hours", offset);
+    timezone_offset = offset;
 }
 
 int get_timezone()
@@ -23,19 +26,32 @@ static bool is_leap_year(uint16_t year)
 static uint8_t days_in_month(uint8_t month, uint16_t year)
 {
     switch (month) {
-    case 1: return 31;
-    case 2: return is_leap_year(year) ? 29 : 28;
-    case 3: return 31;
-    case 4: return 30;
-    case 5: return 31;
-    case 6: return 30;
-    case 7: return 31;
-    case 8: return 31;
-    case 9: return 30;
-    case 10: return 31;
-    case 11: return 30;
-    case 12: return 31;
-    default: return 0;
+    case 1:
+        return 31;
+    case 2:
+        return is_leap_year(year) ? 29 : 28;
+    case 3:
+        return 31;
+    case 4:
+        return 30;
+    case 5:
+        return 31;
+    case 6:
+        return 30;
+    case 7:
+        return 31;
+    case 8:
+        return 31;
+    case 9:
+        return 30;
+    case 10:
+        return 31;
+    case 11:
+        return 30;
+    case 12:
+        return 31;
+    default:
+        return 0;
     }
 }
 
@@ -84,6 +100,6 @@ datetime_t get_local_datetime()
 
 void format_datetime(datetime_t *dt, char *buf, uint32_t size)
 {
-    snprintf(buf, size, "%04d-%02d-%02d %02d:%02d:%02d",
-             dt->year, dt->month, dt->day, dt->hour, dt->minute, dt->second);
+    snprintf(buf, size, "%04d-%02d-%02d %02d:%02d:%02d", dt->year, dt->month,
+             dt->day, dt->hour, dt->minute, dt->second);
 }

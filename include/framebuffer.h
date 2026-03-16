@@ -26,6 +26,15 @@ typedef struct {
 
 extern cursor_t cursor;
 
+typedef struct {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+} fb_viewport_t;
+
+extern fb_viewport_t fb_viewport;
+
 // Initialise the framebuffer
 void fb_init();
 struct limine_framebuffer *get_fb_data();

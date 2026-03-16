@@ -22,11 +22,9 @@ static void wasm_init(void)
 void main_menu()
 {
     menu_t apps[] = {
-        {"Typewriter", &typewriter_main},
-        {"Key notes", &key_notes_main},
-        {"Shell", &shell_main},
-        {"WASM Init", &wasm_init},
-        {"Test menu", &test_menu},
+        {"Typewriter", &typewriter_main}, {"Key notes", &key_notes_main},
+        {"Shell", &shell_main},           {"Settings", &settings_main},
+        {"WASM Init", &wasm_init},        {"Test menu", &test_menu},
     };
     create_menu("Main menu", "Choose an app to launch", apps, ARRAY_SIZE(apps));
 }

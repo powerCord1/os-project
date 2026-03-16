@@ -35,6 +35,7 @@ const uint32_t default_fg = 0xFFFFFF;
 const uint32_t default_bg = 0x000000;
 
 cursor_t cursor;
+fb_viewport_t fb_viewport;
 
 static bool overwrite_mode = false;
 bool fb_is_initialised = false;
@@ -57,6 +58,7 @@ void fb_init()
     fg = 0xFFFFFF;
     bg = 0x000000;
 
+    // Initialise the cursor
     cursor.x = 0;
     cursor.y = 0;
     memset(
@@ -65,6 +67,12 @@ void fb_init()
             cursor.under)); // Shouldn't it be just sizeof(cursor.under)? I seem
                             // to be getting a triple fault when i do this
     cursor.visible = false;
+
+    // Set the viewport region
+    fb_viewport.x = 0;
+    fb_viewport.y = char_height * DEFAULT_TITLE_HEIGHT;
+    fb_viewport.width = fb->width;
+    fb_viewport.height = fb->height - fb_viewport.y;
 
     fb_is_initialised = true;
     fb_clear();
@@ -327,10 +335,9 @@ void fb_clear_line(uint32_t line_num)
 
 void fb_clear_vp()
 {
-    const uint32_t title_height_pixels = char_height * DEFAULT_TITLE_HEIGHT;
-    fb_clear_region(0, title_height_pixels, fb->width,
-                    fb->height - title_height_pixels);
-    fb_set_cursor(0, title_height_pixels + char_height);
+    fb_clear_region(fb_viewport.x, fb_viewport.y,
+                    fb_viewport.x + fb_viewport.width,
+                    fb_viewport.y + fb_viewport.height);
 }
 
 bool fb_is_region_empty(uint32_t start_x, uint32_t start_y, uint32_t end_x,

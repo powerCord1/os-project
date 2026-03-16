@@ -20,4 +20,5 @@ typedef struct app {
 DECLARE_APP("Typewriter", typewriter);
 DECLARE_APP("Key notes", key_notes);
 DECLARE_APP("Shell", shell);
+DECLARE_APP("Settings", settings)
 DECLARE_APP("File manager", fm);
