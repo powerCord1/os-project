@@ -6,6 +6,7 @@
 #include <time.h>
 
 static int timezone_offset = 0;
+static bool daylight_savings_enabled = false;
 
 void set_timezone(int offset)
 {
@@ -16,6 +17,16 @@ void set_timezone(int offset)
 int get_timezone()
 {
     return timezone_offset;
+}
+
+void set_daylight_savings(bool enabled)
+{
+    daylight_savings_enabled = enabled;
+}
+
+bool get_daylight_savings()
+{
+    return daylight_savings_enabled;
 }
 
 static bool is_leap_year(uint16_t year)

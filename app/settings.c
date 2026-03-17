@@ -24,10 +24,12 @@ typedef struct {
 typedef enum { STATE_NAVIGATING, STATE_EDITING } app_state_t;
 
 static int tz_offset;
+static bool daylight_savings_enabled;
 static bool _keyboard_logging_enabled;
 
 static setting_t settings[] = {
     {"Timezone offset", SETTING_INT, &tz_offset, -12, 12},
+    {"Daylight savings", SETTING_BOOL, &daylight_savings_enabled, 0, 0},
     {"Keyboard Logging", SETTING_BOOL, &_keyboard_logging_enabled, 0, 0},
 };
 
@@ -36,12 +38,14 @@ static setting_t settings[] = {
 static void get_vars()
 {
     tz_offset = get_timezone();
+    daylight_savings_enabled = get_daylight_savings();
     _keyboard_logging_enabled = keyboard_logging_enabled;
 }
 
 static void set_vars()
 {
     set_timezone(tz_offset);
+    set_daylight_savings(daylight_savings_enabled);
     keyboard_logging_enabled = _keyboard_logging_enabled;
 }
 

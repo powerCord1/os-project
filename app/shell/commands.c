@@ -2,10 +2,10 @@
 
 #include <acpi.h>
 #include <ata.h>
-#include <disk.h>
 #include <cmos.h>
 #include <cpu.h>
 #include <debug.h>
+#include <disk.h>
 #include <framebuffer.h>
 #include <fs.h>
 #include <heap.h>
@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <wasm_runner.h>
-
-static bool daylight_savings_enabled = false;
 
 void cmd_history(int argc, char **argv)
 {
@@ -63,23 +61,11 @@ void cmd_help(int argc, char **argv)
 
 void cmd_date(int argc, char **argv)
 {
-    if (argc > 1 && strcmp(argv[1], "--toggle-daylight-savings") == 0) {
-        daylight_savings_enabled = !daylight_savings_enabled;
-        printf("Daylight savings %s\n",
-               daylight_savings_enabled ? "enabled" : "disabled");
-        return;
-    }
+    datetime_t datetime = get_local_datetime();
+    char buf[20];
+    format_datetime(&datetime, buf, sizeof(buf));
 
-    datetime_t datetime;
-    cmos_get_datetime(&datetime);
-
-    if (daylight_savings_enabled) {
-        datetime.hour = (datetime.hour + 1) % 24;
-        // TODO: handle date changes when the time crosses midnight.
-    }
-
-    printf("%02d/%02d/%04d %02d:%02d:%02d\n", datetime.day, datetime.month,
-           datetime.year, datetime.hour, datetime.minute, datetime.second);
+    printf("%s\n", buf);
 }
 
 void cmd_shutdown(int argc, char **argv)
@@ -215,14 +201,15 @@ void cmd_lsblk(int argc, char **argv)
         int found = 0;
         for (int p = 0; p < 4; p++) {
             if (partitions[p].num_sectors > 0) {
-                printf("  Partition %d: Type 0x%x, LBA 0x%x, Sectors %u\n",
-                       p, partitions[p].type, partitions[p].lba_start,
+                printf("  Partition %d: Type 0x%x, LBA 0x%x, Sectors %u\n", p,
+                       partitions[p].type, partitions[p].lba_start,
                        partitions[p].num_sectors);
                 found++;
             }
         }
-        if (!found)
+        if (!found) {
             printf("  No partitions found.\n");
+        }
     }
 }
 
@@ -252,7 +239,8 @@ void cmd_mount(int argc, char **argv)
         return;
     }
 
-    if (part_num < 0 || part_num >= 4 || partitions[part_num].num_sectors == 0) {
+    if (part_num < 0 || part_num >= 4 ||
+        partitions[part_num].num_sectors == 0) {
         printf("Invalid or non-existent partition.\n");
         return;
     }
@@ -514,6 +502,7 @@ void cmd_wasm(int argc, char **argv)
         return;
     }
     int ret = wasm_run_file(argv[1], argc - 1, argv + 1);
-    if (ret != 0)
+    if (ret != 0) {
         printf("Exit code: %d\n", ret);
+    }
 }

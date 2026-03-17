@@ -15,6 +15,8 @@ datetime_t get_datetime();
 
 void set_timezone(int offset_hours);
 int get_timezone();
+void set_daylight_savings(bool enabled);
+bool get_daylight_savings();
 
 // Adjusts the datetime according to the set timezone
 datetime_t get_local_datetime();
