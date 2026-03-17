@@ -30,7 +30,7 @@ static bool _keyboard_logging_enabled;
 static setting_t settings[] = {
     {"Timezone offset", SETTING_INT, &tz_offset, -12, 12},
     {"Daylight savings", SETTING_BOOL, &daylight_savings_enabled, 0, 0},
-    {"Keyboard Logging", SETTING_BOOL, &_keyboard_logging_enabled, 0, 0},
+    {"Keyboard logging", SETTING_BOOL, &_keyboard_logging_enabled, 0, 0},
 };
 
 #define SETTINGS_COUNT ARRAY_SIZE(settings)
