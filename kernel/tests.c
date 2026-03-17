@@ -151,6 +151,13 @@ void random_test()
     }
 }
 
+void colour_test()
+{
+    fb_rgb_test();
+    while (kbd_get_key(true).scancode != KEY_ESC) {
+    }
+}
+
 void sin_test()
 {
     struct limine_framebuffer *fb = get_fb_data();

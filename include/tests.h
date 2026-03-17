@@ -9,6 +9,7 @@ void element_test();
 void pit_test();
 void sin_test();
 void random_test();
+void colour_test();
 void heap_test();
 void bmp_test();
 void page_fault_test();
@@ -22,6 +23,7 @@ static const menu_t tests[] = {
     {"Smash the stack", &ssp_test},
     {"PIT test", &pit_test},
     {"RNG test", &random_test},
+    {"RGB test", &colour_test},
     {"BMP test", &bmp_test},
     {"Trigger page fault", &page_fault_test},
     {"Execute invalid opcode", &invalid_opcode_test},
