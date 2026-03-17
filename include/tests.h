@@ -11,6 +11,7 @@ void sin_test();
 void random_test();
 void colour_test();
 void heap_test();
+void sound_test();
 void bmp_test();
 void page_fault_test();
 void invalid_opcode_test();
@@ -25,6 +26,7 @@ static const menu_t tests[] = {
     {"RNG test", &random_test},
     {"RGB test", &colour_test},
     {"BMP test", &bmp_test},
+    {"Sound test", &sound_test},
     {"Trigger page fault", &page_fault_test},
     {"Execute invalid opcode", &invalid_opcode_test},
     {"Sin wave test", &sin_test},

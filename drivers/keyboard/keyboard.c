@@ -149,20 +149,22 @@ uint64_t keyboard_handler(uint64_t rsp)
 
         if (!kbd_is_modifier_key(key)) {
             char ch = last_char;
-            if (kbd_modifiers.caps_lock && ch >= 'a' && ch <= 'z')
+            if (kbd_modifiers.caps_lock && ch >= 'a' && ch <= 'z') {
                 ch -= 32;
+            }
             tty_t *tty = tty_get(0);
             if (tty->keyboard_attached) {
-                tty_input_scancode(tty, key, ch,
-                                   kbd_modifiers.ctrl, kbd_modifiers.shift);
+                tty_input_scancode(tty, key, ch, kbd_modifiers.ctrl,
+                                   kbd_modifiers.shift);
             } else if (ch) {
                 char buf_ch = ch;
-                if (kbd_modifiers.ctrl)
+                if (kbd_modifiers.ctrl) {
                     buf_ch = ch & 0x1f;
-                else if (kbd_modifiers.shift) {
+                } else if (kbd_modifiers.shift) {
                     char shifted = scancode_shift_map[key];
-                    if (shifted)
+                    if (shifted) {
                         buf_ch = shifted;
+                    }
                 }
                 kbd_buffer_push(buf_ch);
             }
@@ -211,13 +213,21 @@ key_t kbd_get_key(bool wait)
     }
     if (kbd_modifiers.shift) {
         char shifted = scancode_shift_map[last_scancode];
-        if (shifted)
+        if (shifted) {
             last_key.key = shifted;
+        }
     } else if (kbd_modifiers.caps_lock) {
-        if (last_key.key >= 'a' && last_key.key <= 'z')
+        if (last_key.key >= 'a' && last_key.key <= 'z') {
             last_key.key -= 32;
+        }
     }
     return last_key;
+}
+
+void kbd_wait_for_esc()
+{
+    while (kbd_get_key(true).scancode != KEY_ESC)
+        ;
 }
 
 char kbd_capitalise(char c)

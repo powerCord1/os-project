@@ -6,17 +6,18 @@
 #include <menu.h>
 #include <menus.h>
 #include <power.h>
+#include <stdio.h>
 #include <tests.h>
 #include <tty.h>
 #include <wasm_runner.h>
 
 static void wasm_init(void)
 {
-    fb_clear();
-    fb_set_cursor(0, 0);
     tty_sync_from_fb(tty_get(0));
     char *argv[] = {"init"};
-    wasm_run_file("/INIT.WM", 1, argv);
+    if (wasm_run_file("/INIT.WM", 1, argv) == -1) {
+        kbd_wait_for_esc();
+    }
 }
 
 void main_menu()

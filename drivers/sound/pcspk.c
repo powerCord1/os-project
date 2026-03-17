@@ -46,18 +46,6 @@ void beep(uint32_t freq)
     nosound();
 }
 
-void sound_test()
-{
-    for (uint16_t i = 0; i < 20000; i++) {
-        if (kbd_get_key(false).scancode == KEY_ESC) {
-            break;
-        }
-        play_sound(i);
-        wait_ms(1);
-    }
-    nosound();
-}
-
 void check_beep()
 {
     if (pit_beep_requested) {

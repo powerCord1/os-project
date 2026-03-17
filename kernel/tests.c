@@ -13,6 +13,7 @@
 #include <pit.h>
 #include <resource.h>
 #include <scheduler.h>
+#include <sound.h>
 #include <stdio.h>
 #include <string.h>
 #include <tests.h>
@@ -61,8 +62,7 @@ void bmp_test()
 
     fb_draw_image(image, 0, 0);
     bmp_free(image);
-    while (kbd_get_key(true).scancode != KEY_ESC) {
-    }
+    kbd_wait_for_esc();
 }
 
 void element_test()
@@ -121,9 +121,7 @@ void element_test()
         wait_ms(interval);
     }
 
-    while (kbd_get_key(true).scancode != KEY_ESC) {
-        halt();
-    }
+    kbd_wait_for_esc();
 }
 
 void ssp_test()
@@ -154,8 +152,7 @@ void random_test()
 void colour_test()
 {
     fb_rgb_test();
-    while (kbd_get_key(true).scancode != KEY_ESC) {
-    }
+    kbd_wait_for_esc();
 }
 
 void sin_test()
@@ -182,8 +179,7 @@ void sin_test()
                  (uint32_t)offset_y);                              // X-axis
     fb_draw_line(fb->width / 2, 0, fb->width / 2, fb->height - 1); // Y-axis
 
-    while (kbd_get_key(true).scancode != KEY_ESC) {
-    }
+    kbd_wait_for_esc();
 }
 
 void pit_test()
@@ -220,6 +216,18 @@ void heap_test()
     kbd_get_key(true);
 }
 
+void sound_test()
+{
+    for (uint16_t i = 0; i < 20000; i++) {
+        if (kbd_get_key(false).scancode == KEY_ESC) {
+            break;
+        }
+        play_sound(i);
+        wait_ns(100);
+    }
+    nosound();
+}
+
 void page_fault_test()
 {
     __asm__ volatile("mov $0xDEADBEEF, %rbx\n"
@@ -234,6 +242,5 @@ void invalid_opcode_test()
 void list_acpi_devices()
 {
     acpi_list_acpi_devices();
-    while (kbd_get_key(true).scancode != KEY_ESC)
-        ;
+    kbd_wait_for_esc();
 }

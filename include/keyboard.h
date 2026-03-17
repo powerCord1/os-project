@@ -240,6 +240,7 @@ void kbd_update_leds();
 void kbd_send_led_cmd(uint8_t data);
 void kbd_set_typematic_rate(uint8_t rate, uint8_t delay);
 key_t kbd_get_key(bool);
+void kbd_wait_for_esc();
 bool kbd_is_modifier_key(uint8_t scancode);
 char kbd_capitalise(char c);
 void kbd_dump_modifiers();

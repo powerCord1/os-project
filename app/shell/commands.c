@@ -78,12 +78,6 @@ void cmd_reboot(int argc, char **argv)
     sys_reboot();
 }
 
-void cmd_sound_test(int argc, char **argv)
-{
-    printf("WHEEEE\n");
-    sound_test();
-}
-
 void cmd_sysinfo(int argc, char **argv)
 {
     printf("System information:\n");
@@ -130,11 +124,6 @@ void cmd_meminfo(int argc, char **argv)
 void cmd_fbtest(int argc, char **argv)
 {
     fb_matrix_test();
-}
-
-void cmd_rgbtest(int argc, char **argv)
-{
-    fb_rgb_test();
 }
 
 void cmd_memtest(int argc, char **argv)
