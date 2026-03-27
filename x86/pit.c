@@ -8,11 +8,12 @@
 #include <prediction.h>
 #include <stdio.h>
 
+#include <process.h>
 #include <scheduler.h>
 
 #define PIT_FREQUENCY 1000
 
-volatile uint64_t pit_ticks = 0;
+volatile uint64_t system_ticks = 0;
 bool pit_initialised = false;
 
 void pit_init()
@@ -42,8 +43,10 @@ void pit_init()
 
 uint64_t pit_handler(uint64_t rsp)
 {
-    unlikely_warn(++pit_ticks == UINT64_MAX,
+    unlikely_warn(++system_ticks == UINT64_MAX,
                   "PIT tick overflow, system may be unstable");
+
+    wali_check_timers();
 
     return scheduler_schedule(rsp);
 }
@@ -51,8 +54,8 @@ uint64_t pit_handler(uint64_t rsp)
 void pit_check()
 {
     uint64_t i = 0;
-    uint64_t init_pit_ticks = pit_ticks;
-    while (pit_ticks == init_pit_ticks) {
+    uint64_t init_system_ticks = system_ticks;
+    while (system_ticks == init_system_ticks) {
         // TODO: panic after 2 seconds by getting timestamp, as CPU speed
         // can change
         if (++i == 10000000000) {

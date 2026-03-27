@@ -11,25 +11,31 @@
 #include <heap.h>
 #include <init.h>
 #include <interrupts.h>
+#include <ioapic.h>
 #include <keyboard.h>
+#include <lapic.h>
 #include <limine.h>
 #include <mouse.h>
+#include <pic.h>
 #include <pit.h>
 #include <pmm.h>
 #include <process.h>
 #include <scheduler.h>
 #include <serial.h>
+#include <smp.h>
 #include <stdio.h>
+#include <tss.h>
 #include <tty.h>
 #include <verinfo.h>
 #include <vmm.h>
+#include <wasm_runner.h>
 
 bool is_system_initialised = false;
 
 boot_task_t early_boot_tasks[] = {
     {.msg = "Set CPU features", .func = cpu_init},
 #if EARLY_SERIAL
-    {.msg = "Init serial", .func = serial_init}, // so we can get debug info
+    {.msg = "Init serial", .func = serial_init},
 #endif
     {.msg = "Log boot info", .func = log_boot_info},
     {.msg = "Store boot time", .func = store_boot_time},
@@ -51,7 +57,12 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init TSC", .func = tsc_init},
 #if ACPI_ENABLED
     {.msg = "Init ACPI", .func = acpi_init},
+    {.msg = "Parse MADT", .func = acpi_parse_madt},
 #endif
+    {.msg = "Init SMP", .func = smp_init},
+    {.msg = "Init LAPIC", .func = lapic_init},
+    {.msg = "Init IOAPIC", .func = ioapic_setup},
+    {.msg = "Init TSS", .func = tss_init},
     {.msg = "Register filesystem drivers", .func = fat32_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init mouse", .func = mouse_init},
@@ -59,9 +70,12 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init TTY", .func = tty_init},
     {.msg = "Init scheduler", .func = scheduler_init},
     {.msg = "Init process table", .func = proc_table_init},
+    {.msg = "Init WASM runtime", .func = wasm_runtime_setup},
 };
 
 boot_task_t late_boot_tasks[] = {
+    {.msg = "Start LAPIC timer", .func = lapic_timer_start},
+    {.msg = "Start APs", .func = smp_start_aps},
     {.msg = "Start scheduler", .func = scheduler_start},
 };
 

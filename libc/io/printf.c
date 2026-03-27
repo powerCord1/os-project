@@ -90,19 +90,6 @@ int vprintf_generic(int (*putc_func)(int, void *), void *putc_data,
             }
             written++;
             continue;
-        } else if (*format == 's') {
-            format++;
-            const char *str = va_arg(parameters, const char *);
-            size_t len = strlen(str);
-            if (maxrem < len) {
-                // TODO: Set errno to EOVERFLOW.
-                return -1;
-            }
-            if (!print(putc_func, putc_data, str, len)) {
-                return -1;
-            }
-            written += len;
-            continue;
         } else if (*format == 'x') {
             // This case is now handled by the more generic parser below
             // to support flags and width, so we just fall through.
@@ -116,6 +103,22 @@ int vprintf_generic(int (*putc_func)(int, void *), void *putc_data,
             width = width * 10 + (*format - '0');
             format++;
         }
+
+        int precision = -1;
+        if (*format == '.') {
+            format++;
+            if (*format == '*') {
+                precision = va_arg(parameters, int);
+                format++;
+            } else {
+                precision = 0;
+                while (*format >= '0' && *format <= '9') {
+                    precision = precision * 10 + (*format - '0');
+                    format++;
+                }
+            }
+        }
+
         if (*format == 'l') {
             is_long = true;
             format++;
@@ -167,13 +170,12 @@ int vprintf_generic(int (*putc_func)(int, void *), void *putc_data,
         } else if (*format == 'u') {
             format++;
             unsigned int i = va_arg(parameters, unsigned int);
-            char str[11]; // Max 10 chars for a 32-bit unsigned int + null
+            char str[11];
             uitoa(str, i);
             size_t len = strlen(str);
             int padding = (width > (int)len) ? (width - len) : 0;
 
             if (maxrem < len + padding) {
-                // TODO: Set errno to EOVERFLOW.
                 return -1;
             }
             for (int j = 0; j < padding; j++) {
@@ -183,6 +185,18 @@ int vprintf_generic(int (*putc_func)(int, void *), void *putc_data,
                 return -1;
             }
             written += len + padding;
+            continue;
+        } else if (*format == 's') {
+            format++;
+            const char *str = va_arg(parameters, const char *);
+            size_t len = strlen(str);
+            if (precision >= 0 && (size_t)precision < len)
+                len = precision;
+            if (maxrem < len)
+                return -1;
+            if (!print(putc_func, putc_data, str, len))
+                return -1;
+            written += len;
             continue;
         } else {
             format = format_begun_at;

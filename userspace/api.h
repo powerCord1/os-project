@@ -41,6 +41,22 @@ extern int spawn(const char *path, int path_len, const char *args,
 extern int waitpid(int pid) WASM_IMPORT(waitpid);
 extern int kill(int pid) WASM_IMPORT(kill);
 extern int getpid(void) WASM_IMPORT(getpid);
+extern int ptrace(int request, int pid, int addr, int data) WASM_IMPORT(ptrace);
+extern int wait4(int pid, int *wstatus) WASM_IMPORT(wait4);
+
+#define PTRACE_TRACEME    0
+#define PTRACE_CONT       7
+#define PTRACE_GETREGS   12
+#define PTRACE_SYSCALL   24
+
+#define PTRACE_MAX_ARGS   6
+
+typedef struct {
+    int syscall_nr;
+    long long args[PTRACE_MAX_ARGS];
+    long long ret;
+    int at_entry;
+} ptrace_info_t;
 
 /* TTY */
 extern int tty_set_mode(int mode) WASM_IMPORT(tty_set_mode);

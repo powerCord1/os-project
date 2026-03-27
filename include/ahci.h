@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // AHCI Signatures
@@ -118,7 +119,15 @@ typedef struct {
     hba_prdt_entry_t prdt_entry[];
 } __attribute__((packed)) hba_cmd_tbl_t;
 
+typedef struct {
+    volatile bool done;
+    volatile bool error;
+    volatile uint64_t waiting_thread;
+} ahci_port_state_t;
+
 extern hba_mem_t *ahci_abar;
+extern ahci_port_state_t ahci_port_states[32];
+extern volatile bool ahci_irq_enabled;
 
 void ahci_init();
 void ahci_reset(hba_mem_t *abar_ptr);

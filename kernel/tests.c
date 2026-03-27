@@ -181,12 +181,12 @@ void sin_test()
 
 void pit_test()
 {
-    uint64_t last_check_ticks = pit_ticks;
+    uint64_t last_check_ticks = system_ticks;
     uint64_t seconds = 0;
     while (true) {
-        if (pit_ticks >= last_check_ticks + 1000) {
+        if (system_ticks >= last_check_ticks + 1000) {
             seconds++;
-            last_check_ticks = pit_ticks;
+            last_check_ticks = system_ticks;
             printf("%lu\r", seconds);
         }
         if (kbd_get_key(false).scancode == KEY_ESC) {

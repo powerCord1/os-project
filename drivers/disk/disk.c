@@ -1,7 +1,6 @@
 #include <ata.h>
 #include <debug.h>
 #include <disk.h>
-#include <heap.h>
 #include <nvme.h>
 #include <pmm.h>
 #include <sata.h>
@@ -29,55 +28,95 @@ static disk_driver_t ata_driver = {
     .write_sectors = ata_disk_write,
 };
 
+#define SATA_MAX_PAGES 32
+
 bool sata_disk_read(disk_t *d, uint64_t lba, uint32_t count, void *buf)
 {
-    void *phys = pmm_alloc_page();
-    if (!phys)
-        return false;
-
-    void *dma_buf = phys_to_virt(phys);
     uint8_t *dst = (uint8_t *)buf;
     uint32_t remaining = count;
 
     while (remaining > 0) {
-        uint32_t chunk = remaining > 8 ? 8 : remaining;
-        if (!sata_read((hba_port_t *)d->driver_data, lba, chunk, dma_buf)) {
-            pmm_free_page(phys);
+        uint32_t chunk = remaining > (SATA_MAX_PAGES * 8)
+                             ? (SATA_MAX_PAGES * 8)
+                             : remaining;
+        int num_pages = (chunk * 512 + 4095) / 4096;
+
+        void *phys_pages[SATA_MAX_PAGES];
+        for (int i = 0; i < num_pages; i++) {
+            phys_pages[i] = pmm_alloc_page();
+            if (!phys_pages[i]) {
+                for (int j = 0; j < i; j++)
+                    pmm_free_page(phys_pages[j]);
+                return false;
+            }
+        }
+
+        if (!sata_read_pages((hba_port_t *)d->driver_data, lba, chunk,
+                             phys_pages, num_pages)) {
+            for (int i = 0; i < num_pages; i++)
+                pmm_free_page(phys_pages[i]);
             return false;
         }
-        memcpy(dst, dma_buf, chunk * 512);
-        dst += chunk * 512;
+
+        uint32_t bytes_left = chunk * 512;
+        for (int i = 0; i < num_pages && bytes_left > 0; i++) {
+            uint32_t n = bytes_left > 4096 ? 4096 : bytes_left;
+            memcpy(dst, phys_to_virt(phys_pages[i]), n);
+            pmm_free_page(phys_pages[i]);
+            dst += n;
+            bytes_left -= n;
+        }
+
         lba += chunk;
         remaining -= chunk;
     }
 
-    pmm_free_page(phys);
     return true;
 }
 
 bool sata_disk_write(disk_t *d, uint64_t lba, uint32_t count, const void *buf)
 {
-    void *phys = pmm_alloc_page();
-    if (!phys)
-        return false;
-
-    void *dma_buf = phys_to_virt(phys);
     const uint8_t *src = (const uint8_t *)buf;
     uint32_t remaining = count;
 
     while (remaining > 0) {
-        uint32_t chunk = remaining > 8 ? 8 : remaining;
-        memcpy(dma_buf, src, chunk * 512);
-        if (!sata_write((hba_port_t *)d->driver_data, lba, chunk, dma_buf)) {
-            pmm_free_page(phys);
+        uint32_t chunk = remaining > (SATA_MAX_PAGES * 8)
+                             ? (SATA_MAX_PAGES * 8)
+                             : remaining;
+        int num_pages = (chunk * 512 + 4095) / 4096;
+
+        void *phys_pages[SATA_MAX_PAGES];
+        for (int i = 0; i < num_pages; i++) {
+            phys_pages[i] = pmm_alloc_page();
+            if (!phys_pages[i]) {
+                for (int j = 0; j < i; j++)
+                    pmm_free_page(phys_pages[j]);
+                return false;
+            }
+        }
+
+        uint32_t bytes_left = chunk * 512;
+        for (int i = 0; i < num_pages && bytes_left > 0; i++) {
+            uint32_t n = bytes_left > 4096 ? 4096 : bytes_left;
+            memcpy(phys_to_virt(phys_pages[i]), src, n);
+            src += n;
+            bytes_left -= n;
+        }
+
+        if (!sata_write_pages((hba_port_t *)d->driver_data, lba, chunk,
+                              phys_pages, num_pages)) {
+            for (int i = 0; i < num_pages; i++)
+                pmm_free_page(phys_pages[i]);
             return false;
         }
-        src += chunk * 512;
+
+        for (int i = 0; i < num_pages; i++)
+            pmm_free_page(phys_pages[i]);
+
         lba += chunk;
         remaining -= chunk;
     }
 
-    pmm_free_page(phys);
     return true;
 }
 

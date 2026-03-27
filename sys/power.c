@@ -69,7 +69,7 @@ void sys_suspend()
 void do_shutdown_calls()
 {
     disable_interrupts();
-    if (!vfs_unmount()) {
+    if (!vfs_unmount("/")) {
         log_err("Failed to unmount filesystems");
     }
 }

@@ -94,7 +94,7 @@ static char read_serial()
     return serial_in(0);
 }
 
-static void write_serial(char a)
+void write_serial(char a)
 {
     if (!debug_port.exists) {
         return;
