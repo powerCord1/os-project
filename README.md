@@ -12,6 +12,11 @@
 2. Create an entry in the `settings[]` array with the name and the temporary value
 3. Add functions to get and set the real value of the settings by adding to `get_vars` and `set_vars`
 
+### Adding a test
+1. Create a function prototype in `tests.h`
+2. Add the prototype to the `tests` array in `tests.h`, along with the test name
+3. Define the function in `kernel/tests.c`
+
 ## Building
 To compile the kernel and cdrom, run: `make cdrom`<br>
 You can also cross-compile by specifying the compiler prefix using the `CROSS-PREFIX` make argument
