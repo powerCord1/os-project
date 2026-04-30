@@ -32,5 +32,6 @@
             "binaryArgs": []
         }
     ],
-    "git-blame.configs.statusBar.length": "short"
+    "git-blame.configs.statusBar.length": "short",
+    "cmake.ignoreCMakeListsMissing": true
 }

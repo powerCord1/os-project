@@ -106,12 +106,12 @@ void cmd_sysinfo(int argc, char **argv)
     } else {
         printf("Battery percentage: %d%%\n", battery_percentage);
     }
-    printf("CPU temperature: %.2f°C\n", acpi_get_cpu_temp(false));
+    printf("CPU temperature: %.2f C\n", acpi_get_cpu_temp(false));
 }
 
 void cmd_susinfo(int argc, char **argv)
 {
-    printf("sus");
+    printf("sus\n");
 }
 
 void cmd_meminfo(int argc, char **argv)

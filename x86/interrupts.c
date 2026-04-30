@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <apic.h>
 #include <cpu.h>
 #include <debug.h>
 #include <gdt.h>
@@ -27,6 +28,22 @@ void (*exception_handlers[32])(interrupt_frame_t *);
 
 idt_entry_t idt[IDT_ENTRIES];
 idtr_t idtr;
+
+bool apic_in_use = false;
+
+bool is_apic_in_use()
+{
+    return apic_in_use;
+}
+
+void interrupt_send_eoi(uint8_t irq)
+{
+    if (apic_in_use) {
+        lapic_eoi();
+    } else {
+        pic_sendEOI(irq);
+    }
+}
 
 uint64_t exception_dispatch(uint64_t rsp, uint8_t vector)
 {

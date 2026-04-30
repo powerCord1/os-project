@@ -1,4 +1,5 @@
 #include <acpi.h>
+#include <apic.h>
 #include <array.h>
 #include <ata.h>
 #include <cpu.h>
@@ -52,6 +53,7 @@ boot_task_t boot_tasks[] = {
 #if ACPI_ENABLED
     {.msg = "Init ACPI", .func = acpi_init},
 #endif
+    {.msg = "Init APIC", .func = apic_init},
     {.msg = "Register filesystem drivers", .func = fat32_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init mouse", .func = mouse_init},

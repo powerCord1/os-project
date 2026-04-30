@@ -1,11 +1,13 @@
 #include <stddef.h>
 
 #include <acpi.h>
+#include <apic.h>
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
 #include <heap.h>
 #include <image.h>
+#include <interrupts.h>
 #include <keyboard.h>
 #include <limine_defs.h>
 #include <math.h>
@@ -242,5 +244,37 @@ void invalid_opcode_test()
 void list_acpi_devices()
 {
     acpi_list_acpi_devices();
+    kbd_wait_for_esc();
+}
+
+void apic_test()
+{
+    printf("APIC Test\n");
+    printf("apic_in_use: %s\n", is_apic_in_use() ? "true" : "false");
+
+    if (!is_apic_in_use()) {
+        printf("APIC is not initialized. Test skipped.\n");
+        kbd_wait_for_esc();
+        return;
+    }
+
+    uint32_t id = lapic_read(LAPIC_ID);
+    uint32_t ver = lapic_read(LAPIC_VER);
+
+    printf("LAPIC ID: 0x%08x\n", id);
+    printf("LAPIC Version: 0x%08x\n", ver);
+
+    printf("Verifying PIT interrupts through APIC...\n");
+    uint64_t start_ticks = pit_ticks;
+    wait_ms(100);
+    uint64_t end_ticks = pit_ticks;
+
+    if (end_ticks > start_ticks) {
+        printf("SUCCESS: PIT interrupts received (%lu ticks in 100ms)\n",
+               end_ticks - start_ticks);
+    } else {
+        printf("FAILURE: No PIT interrupts received!\n");
+    }
+
     kbd_wait_for_esc();
 }

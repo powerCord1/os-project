@@ -18,6 +18,10 @@ void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
 uint64_t irq_dispatch(uint64_t rsp, uint8_t irq);
 void register_exceptions();
 
+void interrupt_send_eoi(uint8_t irq);
+bool is_apic_in_use();
+extern bool apic_in_use;
+
 extern struct irq_handler_entry *irq_handlers[16];
 extern void (*exception_handlers[32])(interrupt_frame_t *);
 

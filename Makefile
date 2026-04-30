@@ -142,7 +142,7 @@ disk: wasm
 	@./buildscripts/mkdisk.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
 	@echo "Disk image created: $(DISK_IMG)"
 
-run: $(ISO_TARGET) wasm disk
+run: $(ISO_TARGET) wasm disk 
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
 
 run_noaudio: $(ISO_TARGET) wasm disk

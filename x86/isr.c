@@ -115,8 +115,8 @@ EXCEPTION_HANDLER(res31, 31)
         __asm__ volatile("mov %rsp, %rdi\n"                                    \
                          "call " #handler "\n"                                 \
                          "mov %rax, %rsp\n"                                    \
-                         "movb $" #irq_num ", %al\n"                           \
-                         "call pic_sendEOI\n");                                \
+                         "mov $" #irq_num ", %rdi\n"                           \
+                         "call interrupt_send_eoi\n");                         \
         POP_REGS()                                                             \
         IRETQ()                                                                \
     }
@@ -132,8 +132,8 @@ IRQ_HANDLER(isr_keyboard, keyboard_handler, 1)
                          "mov $" #irq_num ", %rsi\n"                           \
                          "call irq_dispatch\n"                                 \
                          "mov %rax, %rsp\n"                                    \
-                         "movb $" #irq_num ", %al\n"                           \
-                         "call pic_sendEOI\n");                                \
+                         "mov $" #irq_num ", %rdi\n"                           \
+                         "call interrupt_send_eoi\n");                         \
         POP_REGS()                                                             \
         IRETQ()                                                                \
     }

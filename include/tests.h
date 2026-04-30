@@ -16,6 +16,7 @@ void bmp_test();
 void page_fault_test();
 void invalid_opcode_test();
 void list_acpi_devices();
+void apic_test();
 
 static const menu_t tests[] = {
     {"Thread test", &thread_test},
@@ -32,4 +33,5 @@ static const menu_t tests[] = {
     {"Sin wave test", &sin_test},
     {"Heap test", &heap_test},
     {"List all ACPI devices", &list_acpi_devices},
+    {"APIC test", &apic_test},
 };
