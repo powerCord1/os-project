@@ -33,5 +33,6 @@
         }
     ],
     "git-blame.configs.statusBar.length": "short",
-    "cmake.ignoreCMakeListsMissing": true
+    "cmake.ignoreCMakeListsMissing": true,
+    "discord.enabled": true
 }

@@ -62,7 +62,7 @@ void bmp_test()
         return;
     }
 
-    fb_draw_image(image, 0, 0);
+    fb_draw_image(image, 0, fb_viewport.y);
     bmp_free(image);
     kbd_wait_for_esc();
 }
@@ -245,6 +245,11 @@ void list_acpi_devices()
 {
     acpi_list_acpi_devices();
     kbd_wait_for_esc();
+}
+
+void popup_test()
+{
+    launch_popup("test popup");
 }
 
 void apic_test()

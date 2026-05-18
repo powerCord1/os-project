@@ -1,8 +1,11 @@
 #include <stddef.h>
+#include <string.h>
 
 #include <debug.h>
+#include <font.h>
 #include <framebuffer.h>
 #include <keyboard.h>
+#include <limine_defs.h>
 #include <menu.h>
 #include <stdio.h>
 
@@ -55,4 +58,43 @@ void create_menu(const char *title, const char *prompt, menu_t *menu,
             goto wait_for_key;
         }
     }
+}
+
+void launch_popup(const char *message)
+{
+    uint32_t old_fg = fb_get_fg();
+    uint32_t old_bg = fb_get_bg();
+
+    size_t msg_len = strlen(message);
+    uint32_t box_width = (msg_len + 4) * char_width;
+    uint32_t box_height = 5 * char_height;
+
+    uint32_t x = (fb->width - box_width) / 2;
+    uint32_t y = (fb->height - box_height) / 2;
+
+#if DRAW_POPUP_SHADOW
+    fb_draw_rect(x + 4, y + 4, box_width, box_height, 0x444444);
+#endif
+
+    // Box background
+    fb_draw_rect(x, y, box_width, box_height, old_fg);
+
+    // Inner box
+    fb_draw_rect(x + 2, y + 2, box_width - 4, box_height - 4, old_bg);
+
+    fb_set_color(old_fg, old_bg);
+    fb_set_cursor(x + 2 * char_width, y + 2 * char_height);
+    printf("%s", message);
+    fb_hide_cursor();
+
+    while (1) {
+        key_t keypress = kbd_get_key(true);
+        if (keypress.scancode == KEY_ENTER || keypress.scancode == KEY_ESC ||
+            keypress.scancode == KEY_SPACE) {
+            break;
+        }
+    }
+
+    fb_show_cursor();
+    fb_set_color(old_fg, old_bg);
 }

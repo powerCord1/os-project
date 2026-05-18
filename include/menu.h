@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#define DRAW_POPUP_SHADOW 0
+
 // Menu entry
 typedef struct {
     const char *name;
@@ -18,3 +20,7 @@ typedef struct {
 void create_menu(const char *title, const char *prompt, menu_t *menu,
                  size_t item_count); // item_count needs to be a paramater due
                                      // to pointer decay
+
+/// @brief Launch a popup dialog with a message
+/// @param message The message to display
+void launch_popup(const char *message);
