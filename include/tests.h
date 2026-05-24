@@ -18,6 +18,7 @@ void invalid_opcode_test();
 void list_acpi_devices();
 void popup_test();
 void apic_test();
+void hda_test();
 
 static const menu_t tests[] = {
     {"Thread test", &thread_test},
@@ -36,4 +37,5 @@ static const menu_t tests[] = {
     {"List all ACPI devices", &list_acpi_devices},
     {"Popup test", &popup_test},
     {"APIC test", &apic_test},
+    {"HD audio test", &hda_test},
 };

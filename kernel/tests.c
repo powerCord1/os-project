@@ -5,6 +5,7 @@
 #include <cpu.h>
 #include <debug.h>
 #include <framebuffer.h>
+#include <hda.h>
 #include <heap.h>
 #include <image.h>
 #include <interrupts.h>
@@ -282,4 +283,9 @@ void apic_test()
     }
 
     kbd_wait_for_esc();
+}
+
+void hda_test()
+{
+    hda_play_test_sound();
 }

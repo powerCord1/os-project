@@ -126,7 +126,7 @@ C_OBJECTS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(C_SOURCES))
 ASM_OBJECTS = $(patsubst $(SRCDIR)/%.s,$(BUILDDIR)/%.o,$(ASM_SOURCES))
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
-QEMU_PREFIX = -enable-kvm -machine q35,acpi=on -cpu host -display sdl -serial stdio -drive format=raw,file=disk.img,if=ide -boot d
+QEMU_PREFIX = -enable-kvm -machine q35,acpi=on -cpu host -display sdl -serial stdio -device intel-hda -device hda-output,audiodev=snd0 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -drive format=raw,file=disk.img,if=ide -boot d
 
 all: $(TARGET)
 
@@ -143,7 +143,7 @@ disk: wasm
 	@echo "Disk image created: $(DISK_IMG)"
 
 run: $(ISO_TARGET) wasm disk 
-	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX) -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
+	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX)
 
 run_noaudio: $(ISO_TARGET) wasm disk
 	qemu-system-x86_64 -cdrom $(ISO_TARGET) $(QEMU_PREFIX)

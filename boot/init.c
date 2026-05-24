@@ -9,6 +9,7 @@
 #include <framebuffer.h>
 #include <fs.h>
 #include <gdt.h>
+#include <hda.h>
 #include <heap.h>
 #include <init.h>
 #include <interrupts.h>
@@ -59,6 +60,7 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init mouse", .func = mouse_init},
     {.msg = "Init keyboard", .func = kbd_init},
     {.msg = "Init TTY", .func = tty_init},
+    // {.msg = "Init HDA audio", .func = hda_init},
     {.msg = "Init scheduler", .func = scheduler_init},
     {.msg = "Init process table", .func = proc_table_init},
 };
