@@ -15,6 +15,8 @@
 #define VMM_WRITE (1 << 1)
 // Set if the page is accessible from user mode
 #define VMM_USER (1 << 2)
+// Set to disable caching (for MMIO regions)
+#define VMM_CACHE_DISABLE (1 << 4)
 
 #define KERNEL_DYNAMIC_START 0xFFFF900000000000
 #define KERNEL_DYNAMIC_END 0xFFFFBFFFFFFFFFFF
@@ -47,3 +49,4 @@ void *virt_to_phys(void *virt_addr);
 // Helper to convert virtual address to physical by walking the page tables
 void *vmm_get_phys(void *virt_addr);
 void *find_free_virt_pages(size_t num_pages);
+void vmm_unmap_page(void *virt_addr);

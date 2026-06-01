@@ -13,8 +13,8 @@ void wait_ms(uint64_t ms)
     if (!pit_initialised) {
         return;
     }
-    size_t eticks = pit_ticks + ms;
-    while (pit_ticks < eticks) {
+    size_t eticks = system_ticks + ms;
+    while (system_ticks < eticks) {
         enable_interrupts();
         __asm__ volatile("hlt");
         disable_interrupts();

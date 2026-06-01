@@ -1,6 +1,6 @@
 #include <stddef.h>
 
-#define HEAP_SIZE 1024 * 1024 * 16 // 16 MB
+#define HEAP_SIZE (1024 * 1024 * 32)
 
 void *malloc(size_t size);
 void free(void *ptr);

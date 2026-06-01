@@ -1,5 +1,6 @@
 #pragma once
 
+#include <lock.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <waitqueue.h>
@@ -12,6 +13,7 @@ typedef struct {
     volatile uint16_t head, tail;
     int read_refs, write_refs;
     bool active;
+    spinlock_t lock;
     waitqueue_t read_wq;
     waitqueue_t write_wq;
 } pipe_t;

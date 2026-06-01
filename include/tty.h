@@ -13,13 +13,25 @@ typedef enum { TTY_MODE_COOKED, TTY_MODE_RAW } tty_input_mode_t;
 typedef enum { TTY_STATE_NORMAL, TTY_STATE_ESC, TTY_STATE_CSI } tty_parse_state_t;
 
 typedef struct {
+    char c;
+    uint32_t fg, bg;
+    bool bold;
+    bool reverse;
+} tty_cell_t;
+
+typedef struct {
     int id;
     uint32_t cols, rows;
 
     uint32_t cursor_row, cursor_col;
+    uint32_t prev_cursor_row, prev_cursor_col;
+    bool cursor_visible;
 
     uint32_t fg, bg;
     bool bold;
+    bool reverse;
+
+    tty_cell_t *cells;
 
     tty_input_mode_t input_mode;
     char input_buf[TTY_INPUT_BUF_SIZE];
@@ -33,6 +45,9 @@ typedef struct {
     int esc_params[TTY_ESC_PARAMS_MAX];
     int esc_param_count;
     bool esc_has_param;
+    bool esc_private;
+
+    uint32_t scroll_top, scroll_bottom;
 
     bool active;
     bool keyboard_attached;
