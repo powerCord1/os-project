@@ -1,12 +1,19 @@
 #include <debug.h>
 
 #include <acpi.h>
+#include <ioapic.h>
 #include <stdio.h>
+#include <uacpi/acpi.h>
 #include <uacpi/internal/types.h>
 #include <uacpi/namespace.h>
 #include <uacpi/sleep.h>
 #include <uacpi/status.h>
+#include <uacpi/tables.h>
 #include <uacpi/utilities.h>
+
+static uint32_t madt_lapic_base;
+static uint32_t madt_ioapic_addr;
+static uint32_t madt_ioapic_gsi_base;
 
 uacpi_status acpi_poweroff()
 {
@@ -206,9 +213,57 @@ list_device_callback(void *ctx, uacpi_namespace_node *node, uacpi_u32 depth)
 
 void acpi_list_acpi_devices()
 {
-    // Search for all objects of type 'Device' (UACPI_OBJECT_DEVICE_BIT)
-    // Starting from the root, at any depth.
     uacpi_namespace_for_each_child(uacpi_namespace_root(), list_device_callback,
                                    NULL, UACPI_OBJECT_DEVICE_BIT,
                                    UACPI_MAX_DEPTH_ANY, NULL);
+}
+
+void acpi_parse_madt(void)
+{
+    uacpi_table tbl;
+    uacpi_status ret = uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &tbl);
+    if (uacpi_unlikely_error(ret)) {
+        log_err("MADT not found");
+        return;
+    }
+
+    struct acpi_madt *madt = (struct acpi_madt *)tbl.hdr;
+    madt_lapic_base = madt->local_interrupt_controller_address;
+
+    uint32_t length = madt->hdr.length;
+    uint8_t *ptr = (uint8_t *)madt->entries;
+    uint8_t *end = (uint8_t *)madt + length;
+
+    while (ptr < end) {
+        struct acpi_entry_hdr *entry = (struct acpi_entry_hdr *)ptr;
+        if (entry->length < 2)
+            break;
+
+        switch (entry->type) {
+        case ACPI_MADT_ENTRY_TYPE_IOAPIC: {
+            struct acpi_madt_ioapic *io = (struct acpi_madt_ioapic *)entry;
+            madt_ioapic_addr = io->address;
+            madt_ioapic_gsi_base = io->gsi_base;
+            ioapic_set_base(io->address, io->gsi_base);
+            log_info("MADT: IOAPIC at 0x%x, GSI base %d", io->address,
+                     io->gsi_base);
+            break;
+        }
+        case ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE: {
+            struct acpi_madt_interrupt_source_override *iso =
+                (struct acpi_madt_interrupt_source_override *)entry;
+            log_info("MADT: IRQ override source=%d -> GSI %d flags=0x%x",
+                     iso->source, iso->gsi, iso->flags);
+            ioapic_set_irq_override(iso->source, iso->gsi, iso->flags);
+            break;
+        }
+        default:
+            break;
+        }
+
+        ptr += entry->length;
+    }
+
+    uacpi_table_unref(&tbl);
+    log_info("MADT: LAPIC base 0x%x", madt_lapic_base);
 }

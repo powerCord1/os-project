@@ -17,6 +17,9 @@ void irq_uninstall_handler(uint8_t irq, uint64_t (*handler)(uint64_t, void *),
                            void *ctx);
 uint64_t irq_dispatch(uint64_t rsp, uint8_t irq);
 void register_exceptions();
+void idt_install_lapic_vectors(void);
+uint64_t lapic_timer_handler(uint64_t rsp);
+uint64_t lapic_ipi_sched_handler(uint64_t rsp);
 
 void interrupt_send_eoi(uint8_t irq);
 bool is_apic_in_use();

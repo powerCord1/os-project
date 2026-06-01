@@ -284,7 +284,7 @@ void uacpi_kernel_release_mutex(uacpi_handle handle)
 uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
 {
     uint32_t *counter = (uint32_t *)handle;
-    uacpi_u64 start_ticks = pit_ticks;
+    uacpi_u64 start_ticks = system_ticks;
 
     while (true) {
         uint32_t current_val = __atomic_load_n(counter, __ATOMIC_ACQUIRE);
@@ -299,7 +299,7 @@ uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout)
             continue;
         }
 
-        if (timeout != 0xFFFF && (pit_ticks - start_ticks) > timeout) {
+        if (timeout != 0xFFFF && (system_ticks - start_ticks) > timeout) {
             return UACPI_FALSE;
         }
 

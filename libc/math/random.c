@@ -19,7 +19,7 @@ size_t rand(void)
 size_t random_range(size_t min, size_t max)
 {
     if (next == 1) {
-        srand(pit_ticks);
+        srand(system_ticks);
     }
     if (min > max) {
         log_err("random_range: min cannot be greater than max");

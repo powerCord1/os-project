@@ -31,6 +31,10 @@ __attribute__((used,
     memmap_request = {.id = LIMINE_MEMMAP_REQUEST_ID, .revision = 0};
 
 __attribute__((used,
+               section(".limine_requests"))) volatile struct limine_mp_request
+    mp_request = {.id = LIMINE_MP_REQUEST_ID, .revision = 0, .flags = 0};
+
+__attribute__((used,
                section(".limine_requests_start"))) static volatile uint64_t
     limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;
 

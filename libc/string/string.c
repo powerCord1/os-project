@@ -127,6 +127,29 @@ char *strtok(char *str, const char *delim)
     return str;
 }
 
+char *strtok_r(char *str, const char *delim, char **saveptr)
+{
+    if (!str)
+        str = *saveptr;
+    if (!str)
+        return NULL;
+
+    str += strspn(str, delim);
+    if (*str == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+
+    char *end = strpbrk(str, delim);
+    if (end) {
+        *end = '\0';
+        *saveptr = end + 1;
+    } else {
+        *saveptr = NULL;
+    }
+    return str;
+}
+
 char *strpbrk(const char *str, const char *accept)
 {
     for (; *str; str++) {
@@ -142,6 +165,18 @@ char *strpbrk(const char *str, const char *accept)
 int strcasecmp(const char *s1, const char *s2)
 {
     while (*s1 && (tolower(*s1) == tolower(*s2))) {
+        s1++;
+        s2++;
+    }
+    return tolower(*(const unsigned char *)s1) -
+           tolower(*(const unsigned char *)s2);
+}
+
+int strncasecmp(const char *s1, const char *s2, size_t n)
+{
+    if (!n)
+        return 0;
+    while (--n && *s1 && (tolower(*s1) == tolower(*s2))) {
         s1++;
         s2++;
     }
@@ -189,7 +224,6 @@ char *strchr(const char *s, int c)
     if (c == '\0') {
         return (char *)s;
     }
-    log_verbose("strchr: character not found in string");
     return NULL;
 }
 
@@ -465,6 +499,68 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base)
     return result;
 }
 
+char *strstr(const char *haystack, const char *needle)
+{
+    if (!*needle)
+        return (char *)haystack;
+    size_t needle_len = strlen(needle);
+    for (; *haystack; haystack++) {
+        if (*haystack == *needle && strncmp(haystack, needle, needle_len) == 0)
+            return (char *)haystack;
+    }
+    return NULL;
+}
+
+long strtol(const char *nptr, char **endptr, int base)
+{
+    const char *s = nptr;
+    while (*s == ' ' || *s == '\t' || *s == '\n')
+        s++;
+
+    int sign = 1;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+
+    unsigned long val = strtoul(s, endptr, base);
+    return sign * (long)val;
+}
+
+static void qsort_swap(char *a, char *b, size_t size)
+{
+    char tmp;
+    while (size--) {
+        tmp = *a;
+        *a++ = *b;
+        *b++ = tmp;
+    }
+}
+
+void qsort(void *base, size_t nmemb, size_t size,
+            int (*compar)(const void *, const void *))
+{
+    if (nmemb <= 1)
+        return;
+
+    char *arr = (char *)base;
+    char *pivot = arr + (nmemb - 1) * size;
+    size_t i = 0;
+
+    for (size_t j = 0; j < nmemb - 1; j++) {
+        if (compar(arr + j * size, pivot) <= 0) {
+            qsort_swap(arr + i * size, arr + j * size, size);
+            i++;
+        }
+    }
+    qsort_swap(arr + i * size, pivot, size);
+
+    qsort(arr, i, size, compar);
+    qsort(arr + (i + 1) * size, nmemb - i - 1, size, compar);
+}
+
 double strtod(const char *nptr, char **endptr)
 {
     const char *s = nptr;
@@ -500,4 +596,27 @@ double strtod(const char *nptr, char **endptr)
         *endptr = (char *)s;
     }
     return sign * result;
+}
+
+float strtof(const char *nptr, char **endptr)
+{
+    return (float)strtod(nptr, endptr);
+}
+
+void *bsearch(const void *key, const void *base, size_t nmemb, size_t size,
+              int (*compar)(const void *, const void *))
+{
+    const char *p = base;
+    size_t lo = 0, hi = nmemb;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        int cmp = compar(key, p + mid * size);
+        if (cmp < 0)
+            hi = mid;
+        else if (cmp > 0)
+            lo = mid + 1;
+        else
+            return (void *)(p + mid * size);
+    }
+    return NULL;
 }

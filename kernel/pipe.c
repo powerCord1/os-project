@@ -1,3 +1,4 @@
+#include <lock.h>
 #include <pipe.h>
 #include <string.h>
 
@@ -22,6 +23,7 @@ int pipe_alloc(void)
             p->active = true;
             p->read_refs = 1;
             p->write_refs = 1;
+            p->lock = (spinlock_t){0, "pipe"};
             waitqueue_init(&p->read_wq);
             waitqueue_init(&p->write_wq);
             return i;
@@ -50,12 +52,19 @@ int pipe_read(int pipe_id, uint8_t *buf, int count)
         while (pipe_count(p) == 0) {
             if (p->write_refs <= 0)
                 return total;
-            waitqueue_sleep(&p->read_wq);
+            waitqueue_begin_sleep(&p->read_wq);
+            if (pipe_count(p) > 0 || p->write_refs <= 0) {
+                waitqueue_cancel_sleep(&p->read_wq);
+                break;
+            }
+            waitqueue_end_sleep(&p->read_wq);
         }
+        spinlock_acquire(&p->lock);
         while (total < count && pipe_count(p) > 0) {
             buf[total++] = p->buf[p->tail];
             p->tail = (p->tail + 1) % PIPE_BUF_SIZE;
         }
+        spinlock_release(&p->lock);
         waitqueue_wake_one(&p->write_wq);
         break;
     }
@@ -76,12 +85,19 @@ int pipe_write(int pipe_id, const uint8_t *buf, int count)
             if (p->read_refs <= 0)
                 return -1;
             waitqueue_wake_one(&p->read_wq);
-            waitqueue_sleep(&p->write_wq);
+            waitqueue_begin_sleep(&p->write_wq);
+            if (pipe_free(p) > 0 || p->read_refs <= 0) {
+                waitqueue_cancel_sleep(&p->write_wq);
+                break;
+            }
+            waitqueue_end_sleep(&p->write_wq);
         }
+        spinlock_acquire(&p->lock);
         while (total < count && pipe_free(p) > 0) {
             p->buf[p->head] = buf[total++];
             p->head = (p->head + 1) % PIPE_BUF_SIZE;
         }
+        spinlock_release(&p->lock);
         waitqueue_wake_one(&p->read_wq);
     }
     return total;

@@ -50,10 +50,6 @@ CFLAGS = -std=gnu99 \
 		 -DBUILD_TIME="\"$(BUILD_TIME)\"" \
 		 -DCOMMIT="\"$(COMMIT)\"" \
 		 -I$(INCLUDEDIR) \
-		 -Iwasm3/source \
-		 -Dd_m3LogTimestamps=0 \
-		 -Dd_m3MaxFunctionStackHeight=500 \
-		 -Dd_m3MaxLinearMemoryPages=1024 \
 		 -fno-stack-protector \
 		 -fno-stack-check \
 		 -fno-PIC \
@@ -108,16 +104,88 @@ WASM_CC = clang
 WASM_CFLAGS = --target=wasm32 -nostdlib -O2
 WASM_LDFLAGS = -Wl,--no-entry -Wl,--allow-undefined
 WASM_SRCDIR = userspace
-WASM_SOURCES = $(wildcard $(WASM_SRCDIR)/*.c)
+WALI_USERSPACE = fbtest.c
+WASM_SOURCES = $(filter-out $(addprefix $(WASM_SRCDIR)/,$(WALI_USERSPACE)),$(wildcard $(WASM_SRCDIR)/*.c))
 WASM_BINARIES = $(patsubst $(WASM_SRCDIR)/%.c,$(BUILDDIR)/wasm/%.wm,$(WASM_SOURCES))
+WALI_BINARIES = $(patsubst %.c,$(BUILDDIR)/wasm/%.wm,$(WALI_USERSPACE))
+
+# DOOM (doomgeneric via WALI toolchain)
+WALI_CC = wasm32-unknown-linux-muslwali-cc
+DOOM_SRCDIR = userspace/doom/doomgeneric
+DOOM_EXCLUDE = doomgeneric_sdl.c doomgeneric_win.c doomgeneric_xlib.c \
+               doomgeneric_soso.c doomgeneric_sosox.c doomgeneric_allegro.c \
+               doomgeneric_emscripten.c doomgeneric_linuxvt.c \
+               i_sdlmusic.c i_sdlsound.c i_allegromusic.c i_allegrosound.c \
+               mus2mid.c
+DOOM_ALL_SOURCES = $(wildcard $(DOOM_SRCDIR)/*.c)
+DOOM_SOURCES = $(filter-out $(addprefix $(DOOM_SRCDIR)/,$(DOOM_EXCLUDE)),$(DOOM_ALL_SOURCES))
+DOOM_WASM = $(BUILDDIR)/wasm/doom.wm
+
+# WAMR (WebAssembly Micro Runtime) configuration
+WAMR_DIR = ./wasm-micro-runtime
+WAMR_CORE = $(WAMR_DIR)/core
+
+WAMR_CFLAGS = -I$(WAMR_CORE)/iwasm/include \
+              -I$(WAMR_CORE)/iwasm/interpreter \
+              -I$(WAMR_CORE)/iwasm/common \
+              -I$(WAMR_CORE)/shared/utils \
+              -I$(WAMR_CORE)/shared/mem-alloc \
+              -I$(WAMR_CORE)/shared/platform/include \
+              -Idrivers/wasm/platform \
+              -DWASM_ENABLE_INTERP=1 \
+              -DWASM_ENABLE_AOT=0 \
+              -DWASM_ENABLE_LIBC_BUILTIN=0 \
+              -DWASM_ENABLE_LIBC_WASI=0 \
+              -DWASM_ENABLE_BULK_MEMORY=1 \
+              -DWASM_ENABLE_SHARED_MEMORY=1 \
+              -DWASM_ENABLE_THREAD_MGR=1 \
+              -DWASM_ENABLE_EXCE_HANDLING=1 \
+              -DWASM_ENABLE_TAGS=1 \
+              -DWASM_ENABLE_REF_TYPES=1 \
+              -DWASM_ENABLE_CALL_INDIRECT_OVERLONG=1 \
+              -DWASM_ENABLE_MINI_LOADER=0 \
+              -DBH_PLATFORM_MYOS \
+              -DBH_MALLOC=wasm_runtime_malloc \
+              -DBH_FREE=wasm_runtime_free \
+              -DWASM_ENABLE_BULK_MEMORY_OPT=1 \
+              -I$(WAMR_CORE)/iwasm/libraries/thread-mgr
+
+WAMR_C_SOURCES = \
+    $(WAMR_CORE)/iwasm/interpreter/wasm_interp_classic.c \
+    $(WAMR_CORE)/iwasm/interpreter/wasm_loader.c \
+    $(WAMR_CORE)/iwasm/interpreter/wasm_runtime.c \
+    $(WAMR_CORE)/iwasm/common/wasm_runtime_common.c \
+    $(WAMR_CORE)/iwasm/common/wasm_native.c \
+    $(WAMR_CORE)/iwasm/common/wasm_exec_env.c \
+    $(WAMR_CORE)/iwasm/common/wasm_memory.c \
+    $(WAMR_CORE)/iwasm/common/wasm_loader_common.c \
+    $(WAMR_CORE)/iwasm/common/wasm_application.c \
+    $(WAMR_CORE)/iwasm/common/wasm_shared_memory.c \
+    $(WAMR_CORE)/shared/utils/bh_assert.c \
+    $(WAMR_CORE)/shared/utils/bh_common.c \
+    $(WAMR_CORE)/shared/utils/bh_hashmap.c \
+    $(WAMR_CORE)/shared/utils/bh_leb128.c \
+    $(WAMR_CORE)/shared/utils/bh_list.c \
+    $(WAMR_CORE)/shared/utils/bh_log.c \
+    $(WAMR_CORE)/shared/utils/bh_vector.c \
+    $(WAMR_CORE)/shared/utils/bh_bitmap.c \
+    $(WAMR_CORE)/shared/utils/bh_queue.c \
+    $(WAMR_CORE)/shared/mem-alloc/mem_alloc.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_alloc.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_hmu.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_kfc.c \
+    $(WAMR_CORE)/shared/mem-alloc/ems/ems_gc.c \
+    $(WAMR_CORE)/iwasm/libraries/thread-mgr/thread_manager.c \
+    ./drivers/wasm/platform/myos_platform.c \
+    ./drivers/wasm/platform/myos_thread.c \
+    ./drivers/wasm/platform/myos_time.c
+
+CFLAGS += $(WAMR_CFLAGS)
 
 # Find source files
-WASM3_C_SOURCES = ./wasm3/source/m3_bind.c ./wasm3/source/m3_code.c ./wasm3/source/m3_compile.c \
-                  ./wasm3/source/m3_core.c ./wasm3/source/m3_env.c ./wasm3/source/m3_exec.c \
-                  ./wasm3/source/m3_function.c ./wasm3/source/m3_info.c ./wasm3/source/m3_module.c \
-                  ./wasm3/source/m3_parse.c
-C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*' -not -path './userspace/*' -not -path './wasm3/*') $(WASM3_C_SOURCES)
-ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*')
+C_SOURCES_REGULAR = $(shell find $(SRCDIR) -name '*.c' -not -path './$(BUILDDIR)/*' -not -path './data/*' -not -path './userspace/*' -not -path './wasm3/*' -not -path './wasm-micro-runtime/*' -not -path './drivers/wasm/platform/*') $(WAMR_C_SOURCES)
+ASM_SOURCES = $(shell find $(SRCDIR) -name '*.s' -not -path './$(BUILDDIR)/*' -not -path './wasm-micro-runtime/*') \
+    $(WAMR_CORE)/iwasm/common/arch/invokeNative_em64.s
 DATA_SOURCES = $(wildcard data/*)
 RESOURCE_C_SOURCES = $(patsubst data/%,data/%.c,$(filter-out %.c,$(DATA_SOURCES)))
 C_SOURCES = $(C_SOURCES_REGULAR) $(RESOURCE_C_SOURCES)
@@ -132,13 +200,35 @@ all: $(TARGET)
 
 wasm: $(WASM_BINARIES)
 
+doom: $(DOOM_WASM)
+
 $(BUILDDIR)/wasm/%.wm: $(WASM_SRCDIR)/%.c $(WASM_SRCDIR)/api.h
 	@echo "Compiling WASM $<..."
 	@mkdir -p $(dir $@)
 	$(WASM_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -Wl,--export=_start -o $@ $<
 
-disk: wasm
-	@echo "Creating disk image..."
+$(DOOM_WASM): $(DOOM_SOURCES)
+	@echo "Compiling DOOM..."
+	@mkdir -p $(dir $@)
+	$(WALI_CC) -O2 -DNORMALUNIX -DLINUX \
+		-Wno-implicit-function-declaration -Wno-int-conversion \
+		-Wno-incompatible-pointer-types \
+		-I$(DOOM_SRCDIR) -lm -o $@ $(DOOM_SOURCES)
+
+$(BUILDDIR)/wasm/fbtest.wm: $(WASM_SRCDIR)/fbtest.c
+	@echo "Compiling WALI $<..."
+	@mkdir -p $(dir $@)
+	$(WALI_CC) -O2 -o $@ $<
+
+wali: $(WALI_BINARIES)
+
+disk: wasm wali
+	@echo "Creating ext2 disk image..."
+	@./buildscripts/mkdisk_ext2.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
+	@echo "Disk image created: $(DISK_IMG)"
+
+disk_fat32: wasm
+	@echo "Creating FAT32 disk image..."
 	@./buildscripts/mkdisk.sh $(DISK_IMG) $(DISK_SIZE) $(BUILDDIR)/wasm
 	@echo "Disk image created: $(DISK_IMG)"
 
@@ -212,4 +302,4 @@ format:
 
 rebuild: clean all
 
-.PHONY: all _build clean clean_disk rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands wasm disk
+.PHONY: all _build clean clean_disk rebuild run run_vm run_debug run_cdrom run_cdrom_vm cdrom compile_commands wasm disk disk_fat32

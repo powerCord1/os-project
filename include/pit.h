@@ -7,7 +7,7 @@
 #define PIT_CHANNEL2_DATA_PORT 0x42
 #define SPEAKER_PORT 0x61
 
-extern volatile uint64_t pit_ticks;
+extern volatile uint64_t system_ticks;
 extern bool pit_initialised;
 
 void pit_init();

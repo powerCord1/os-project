@@ -20,6 +20,7 @@ int32_t proc_alloc(int32_t parent_pid)
             proc_table[i].parent_pid = parent_pid;
             proc_table[i].state = PROC_RUNNING;
             waitqueue_init(&proc_table[i].exit_wq);
+            waitqueue_init(&proc_table[i].ptrace_wq);
             return i + 1;
         }
     }
@@ -60,4 +61,5 @@ void proc_mark_exited(int32_t pid, int32_t exit_code)
     e->state = PROC_EXITED;
     e->exit_code = exit_code;
     waitqueue_wake_all(&e->exit_wq);
+    waitqueue_wake_all(&e->ptrace_wq);
 }

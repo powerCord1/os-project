@@ -50,6 +50,8 @@ typedef struct {
     uint32_t fat_size_32;
     uint32_t fat_start;
     uint32_t data_start;
+    uint8_t *fat_cache;
+    uint32_t fat_cache_sectors;
 } fat32_fs_t;
 
 typedef struct {

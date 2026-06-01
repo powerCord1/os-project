@@ -1,7 +1,9 @@
 #include <ahci.h>
 #include <debug.h>
+#include <interrupts.h>
 #include <pci.h>
 #include <pmm.h>
+#include <scheduler.h>
 #include <string.h>
 #include <vmm.h>
 
@@ -10,7 +12,39 @@
 #define HBA_PxCMD_FR 0x4000
 #define HBA_PxCMD_CR 0x8000
 
+#define AHCI_GHC_IE (1 << 1)
+#define AHCI_PORT_IS_DHRS (1 << 0)
+#define AHCI_PORT_IS_TFES (1 << 30)
+
 hba_mem_t *ahci_abar;
+ahci_port_state_t ahci_port_states[32];
+volatile bool ahci_irq_enabled = false;
+
+static uint64_t ahci_irq_handler(uint64_t rsp, void *ctx)
+{
+    (void)ctx;
+    uint32_t is = ahci_abar->is;
+
+    for (int i = 0; i < 32; i++) {
+        if (!(is & (1 << i)))
+            continue;
+
+        hba_port_t *port = &ahci_abar->ports[i];
+        uint32_t port_is = port->is;
+
+        if (port_is & AHCI_PORT_IS_TFES)
+            ahci_port_states[i].error = true;
+
+        ahci_port_states[i].done = true;
+        port->is = port_is;
+
+        if (ahci_port_states[i].waiting_thread)
+            scheduler_unblock(ahci_port_states[i].waiting_thread);
+    }
+
+    ahci_abar->is = is;
+    return rsp;
+}
 
 void ahci_reset(hba_mem_t *abar_ptr)
 {
@@ -18,10 +52,8 @@ void ahci_reset(hba_mem_t *abar_ptr)
     while (abar_ptr->ghc & 1)
         ;
 
-    // Enable AHCI mode
     abar_ptr->ghc |= (1 << 31);
 
-    // Rebase all implemented ports
     uint32_t pi = abar_ptr->pi;
     for (int i = 0; i < 32; i++) {
         if (pi & (1 << i)) {
@@ -33,17 +65,14 @@ void ahci_reset(hba_mem_t *abar_ptr)
 void port_rebase(hba_port_t *port, int portno)
 {
     (void)portno;
-    // Stop command engine
     port->cmd &= ~HBA_PxCMD_ST;
     port->cmd &= ~HBA_PxCMD_FRE;
 
-    // Wait until FR and CR are cleared
     int spin = 0;
     while ((port->cmd & HBA_PxCMD_FR || port->cmd & HBA_PxCMD_CR) && spin < 1000) {
         spin++;
     }
 
-    // Allocate memory for command list and FIS receive area (one page is enough for both)
     void *cl_phys = pmm_alloc_page();
     void *cl_virt = phys_to_virt(cl_phys);
     memset(cl_virt, 0, 4096);
@@ -55,29 +84,20 @@ void port_rebase(hba_port_t *port, int portno)
     port->fb = (uint32_t)(uintptr_t)fb_phys;
     port->fbu = (uint32_t)((uintptr_t)fb_phys >> 32);
 
-    // Allocate memory for command tables (32 tables * 256 bytes = 8KB = 2 pages)
-    void *ct_phys_base1 = pmm_alloc_page();
-    void *ct_phys_base2 = pmm_alloc_page();
-    
     hba_cmd_header_t *cmdheader = (hba_cmd_header_t *)cl_virt;
     for (int i = 0; i < 32; i++) {
-        cmdheader[i].prdtl = 8;
-        
-        void *ct_phys;
-        if (i < 16) {
-            ct_phys = (void *)((uintptr_t)ct_phys_base1 + (i * 256));
-        } else {
-            ct_phys = (void *)((uintptr_t)ct_phys_base2 + ((i - 16) * 256));
-        }
-        
+        void *ct_phys = pmm_alloc_page();
+        void *ct_virt = phys_to_virt(ct_phys);
+        memset(ct_virt, 0, 4096);
+
+        cmdheader[i].prdtl = 0;
         cmdheader[i].ctba = (uint32_t)(uintptr_t)ct_phys;
         cmdheader[i].ctbau = (uint32_t)((uintptr_t)ct_phys >> 32);
-        
-        void *ct_virt = phys_to_virt(ct_phys);
-        memset(ct_virt, 0, 256);
     }
 
-    // Start command engine
+    port->is = (uint32_t)-1;
+    port->ie = AHCI_PORT_IS_DHRS | AHCI_PORT_IS_TFES;
+
     port->cmd |= HBA_PxCMD_FRE;
     port->cmd |= HBA_PxCMD_ST;
 }
@@ -106,7 +126,7 @@ void ahci_init()
 
     uintptr_t abar_phys = pci_get_bar_address(&ahci_dev, 5);
     ahci_abar = (hba_mem_t *)mmap_physical(
-        (void *)0xFFFFFFFF40000000, // A safe "MMIO" virtual range
+        (void *)0xFFFFFFFF40000000,
         (void *)abar_phys, sizeof(hba_mem_t), 0x1B);
 
     if (ahci_abar == NULL) {
@@ -116,5 +136,17 @@ void ahci_init()
 
     log_info("AHCI: Controller found at 0x%016lx", ahci_abar);
 
+    memset((void *)ahci_port_states, 0, sizeof(ahci_port_states));
     ahci_reset(ahci_abar);
+
+    uint8_t irq_line = pci_read_byte(ahci_dev.bus, ahci_dev.device,
+                                      ahci_dev.function, 0x3C);
+    if (irq_line < 16) {
+        irq_install_handler(irq_line, ahci_irq_handler, NULL);
+        ahci_abar->ghc |= AHCI_GHC_IE;
+        ahci_irq_enabled = true;
+        log_info("AHCI: Interrupts enabled on IRQ %d", irq_line);
+    } else {
+        log_warn("AHCI: Invalid IRQ line %d, using polling", irq_line);
+    }
 }

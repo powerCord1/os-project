@@ -38,3 +38,4 @@ static uacpi_iteration_decision
 list_device_callback(void *ctx, uacpi_namespace_node *node, uacpi_u32 depth);
 void acpi_list_acpi_devices();
 float acpi_get_cpu_temp(bool farenheit);
+void acpi_parse_madt(void);

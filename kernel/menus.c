@@ -15,7 +15,7 @@ static void wasm_init(void)
 {
     tty_sync_from_fb(tty_get(0));
     char *argv[] = {"init"};
-    if (wasm_run_file("/INIT.WM", 1, argv) == -1) {
+    if (wasm_run_file("/init.wm", 1, argv) == -1) {
         kbd_wait_for_esc();
     }
 }
