@@ -12,9 +12,9 @@
 
 #define WASM_O_RDONLY 0x0001
 #define WASM_O_WRONLY 0x0002
-#define WASM_O_RDWR   0x0003
-#define WASM_O_CREAT  0x0100
-#define WASM_O_TRUNC  0x0200
+#define WASM_O_RDWR 0x0003
+#define WASM_O_CREAT 0x0100
+#define WASM_O_TRUNC 0x0200
 #define WASM_O_APPEND 0x0400
 
 #define WASM_SEEK_SET 0
@@ -52,10 +52,11 @@ typedef struct {
 } wasm_fd_t;
 
 typedef struct {
-    int32_t wasm_buf_addr;      /* WASM-side jmp_buf address (key) */
-    void *saved_frame;          /* WASM frame of setjmp's caller (prev_frame) */
-    void *saved_stack_top;      /* wasm_stack.top to restore (= native frame start) */
-    void *saved_sp;             /* caller frame's sp at setjmp time */
+    int32_t wasm_buf_addr; /* WASM-side jmp_buf address (key) */
+    void *saved_frame;     /* WASM frame of setjmp's caller (prev_frame) */
+    void
+        *saved_stack_top; /* wasm_stack.top to restore (= native frame start) */
+    void *saved_sp;       /* caller frame's sp at setjmp time */
     bool active;
 } wali_jmpbuf_entry_t;
 
@@ -87,16 +88,16 @@ typedef struct wasm_process {
     wali_jmpbuf_entry_t jmpbufs[WASM_MAX_JMPBUFS];
 
     /* Runtime pointers for fork access (set by wasm_run_module) */
-    void *wasm_module;      /* wasm_module_t — shared, refcounted */
-    void *wasm_inst;        /* wasm_module_inst_t — parent's instance */
-    void *wasm_exec_env;    /* wasm_exec_env_t — parent's exec env */
-    uint8_t *wasm_bytes;    /* original module bytecode */
-    bool is_fork_child;     /* true if this proc was created by fork */
+    void *wasm_module;   /* wasm_module_t — shared, refcounted */
+    void *wasm_inst;     /* wasm_module_inst_t — parent's instance */
+    void *wasm_exec_env; /* wasm_exec_env_t — parent's exec env */
+    uint8_t *wasm_bytes; /* original module bytecode */
+    bool is_fork_child;  /* true if this proc was created by fork */
 
     /* Execve state: set by wali_sys_execve, consumed by runner */
-    uint8_t *execve_wasm_bytes;   /* new module bytecode (malloc'd) */
-    uint32_t execve_wasm_size;    /* size of new module bytecode */
-    bool execve_pending;          /* true when execve is requested */
+    uint8_t *execve_wasm_bytes; /* new module bytecode (malloc'd) */
+    uint32_t execve_wasm_size;  /* size of new module bytecode */
+    bool execve_pending;        /* true when execve is requested */
 } wasm_process_t;
 
 wasm_process_t *wasm_process_create(int argc, char **argv);
