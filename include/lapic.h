@@ -28,6 +28,7 @@
 #define LAPIC_SPURIOUS_VEC  0xFF
 #define LAPIC_IPI_SCHED_VEC 0xFD
 
+void lapic_set_base(uintptr_t phys_addr);
 void lapic_init(void);
 void lapic_eoi(void);
 uint32_t lapic_id(void);

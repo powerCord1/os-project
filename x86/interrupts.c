@@ -2,7 +2,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <apic.h>
 #include <cpu.h>
 #include <debug.h>
 #include <gdt.h>

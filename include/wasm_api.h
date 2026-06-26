@@ -93,6 +93,7 @@ typedef struct wasm_process {
     void *wasm_exec_env; /* wasm_exec_env_t — parent's exec env */
     uint8_t *wasm_bytes; /* original module bytecode */
     bool is_fork_child;  /* true if this proc was created by fork */
+    bool fork_resume;    /* true if interpreter should resume from cur_frame */
 
     /* Execve state: set by wali_sys_execve, consumed by runner */
     uint8_t *execve_wasm_bytes; /* new module bytecode (malloc'd) */

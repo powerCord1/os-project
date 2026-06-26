@@ -1,13 +1,20 @@
 #include <cpu.h>
 #include <debug.h>
+#include <interrupts.h>
 #include <io.h>
 #include <lapic.h>
 #include <pit.h>
 #include <vmm.h>
 
 static volatile uint32_t *lapic_base;
+static uintptr_t lapic_phys_base = 0xFEE00000ULL;
 
 static void lapic_calibrate_timer(uint32_t freq_hz);
+
+void lapic_set_base(uintptr_t phys_addr)
+{
+    lapic_phys_base = phys_addr;
+}
 
 void lapic_write(uint32_t reg, uint32_t val)
 {
@@ -23,7 +30,7 @@ void lapic_init(void)
 {
     if (!lapic_base) {
         lapic_base = (volatile uint32_t *)mmap_physical(
-            NULL, (void *)0xFEE00000ULL, PAGE_SIZE,
+            NULL, (void *)lapic_phys_base, PAGE_SIZE,
             VMM_PRESENT | VMM_WRITE | VMM_CACHE_DISABLE);
         if (!lapic_base)
             return;
@@ -36,6 +43,7 @@ void lapic_init(void)
 
     lapic_eoi();
 
+    apic_in_use = true;
     log_info("LAPIC initialized, ID: %d", lapic_id());
 }
 

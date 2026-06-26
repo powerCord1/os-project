@@ -2,6 +2,7 @@
 
 #include <acpi.h>
 #include <ioapic.h>
+#include <lapic.h>
 #include <stdio.h>
 #include <uacpi/acpi.h>
 #include <uacpi/internal/types.h>
@@ -229,6 +230,7 @@ void acpi_parse_madt(void)
 
     struct acpi_madt *madt = (struct acpi_madt *)tbl.hdr;
     madt_lapic_base = madt->local_interrupt_controller_address;
+    lapic_set_base(madt_lapic_base);
 
     uint32_t length = madt->hdr.length;
     uint8_t *ptr = (uint8_t *)madt->entries;

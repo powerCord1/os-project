@@ -1,5 +1,4 @@
 #include <acpi.h>
-#include <apic.h>
 #include <array.h>
 #include <ata.h>
 #include <cpu.h>
@@ -65,7 +64,6 @@ boot_task_t boot_tasks[] = {
     {.msg = "Init LAPIC", .func = lapic_init},
     {.msg = "Init IOAPIC", .func = ioapic_setup},
     {.msg = "Init TSS", .func = tss_init},
-    {.msg = "Init APIC", .func = apic_init},
     {.msg = "Register filesystem drivers", .func = fat32_init},
     {.msg = "Init disk drivers and filesystems", .func = fs_init},
     {.msg = "Init mouse", .func = mouse_init},
